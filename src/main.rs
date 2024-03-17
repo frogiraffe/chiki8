@@ -1,3 +1,9 @@
+// TODO: Change sound code and seperate it
+// TODO: Reduce flickering
+// TODO: Add args for screen size, scaling, speed, sound
+// TODO: Add tests
+// TODO : Add a way to change keymaps
+// TODO: Add a way to change color
 #![allow(dead_code)]
 #![allow(unused_imports)]
 use sdl2::event::Event;

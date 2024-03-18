@@ -48,6 +48,10 @@ impl Cpu {
     pub fn get_display(&self) -> &[bool; SCREEN_WIDTH * SCREEN_HEIGHT] {
         &self.screen
     }
+    pub fn get_last_buf(&self) -> &[bool; SCREEN_WIDTH * SCREEN_HEIGHT] {
+        &self.prev_screen
+    }
+
     pub fn keypress(&mut self, key: usize, pressed: bool) {
         self.keys[key] = pressed;
     }
@@ -81,7 +85,7 @@ impl Cpu {
         self.stack = [0; 16];
         self.sp = 0;
         self.screen = [false; SCREEN_WIDTH * SCREEN_HEIGHT];
-        self.prev_screen = [false; SCREEN_WIDTH* SCREEN_HEIGHT];
+        self.prev_screen = [false; SCREEN_WIDTH * SCREEN_HEIGHT];
         self.v = [0; 16];
         self.i = 0;
         self.st = 0;
@@ -243,11 +247,10 @@ impl Cpu {
         let y = ((opcode & 0x00F0) >> 4) as usize;
         let vx = self.v[x] as u16;
         let vy = self.v[y] as u16;
-        let (new_vx, carry) = self.v[x].overflowing_add(self.v[y]) ;
+        let (new_vx, carry) = self.v[x].overflowing_add(self.v[y]);
         let new_vf = if carry { 1 } else { 0 };
         self.v[x] = new_vx;
         self.v[0xF] = new_vf;
-
     }
     fn op_8xy5(&mut self, opcode: u16) {
         let x = ((opcode & 0x0F00) >> 8) as usize;
@@ -258,7 +261,6 @@ impl Cpu {
         let new_vf = if borrow { 0 } else { 1 };
         self.v[x] = new_vx;
         self.v[0xF] = new_vf;
-
     }
     fn op_8xy6(&mut self, opcode: u16) {
         let x = ((opcode & 0x0F00) >> 8) as usize;

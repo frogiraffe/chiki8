@@ -26,7 +26,7 @@ pub struct Sound {
 }
 
 impl Sound {
-    pub fn new(sdl_context: &Sdl) -> Sound {
+    pub fn new(sdl_context: &Sdl, volume: f32) -> Sound {
         let audio_subsystem = sdl_context.audio().unwrap();
         let desired_spec = AudioSpecDesired {
             freq: Some(44100),
@@ -37,7 +37,7 @@ impl Sound {
             .open_playback(None, &desired_spec, |spec| SquareWave {
                 phase_inc: 440.0 / spec.freq as f32,
                 phase: 0.0,
-                volume: 0.25,
+                volume,
             })
             .unwrap();
         Sound { device }

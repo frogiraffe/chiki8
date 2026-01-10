@@ -29,6 +29,8 @@ pub struct Cpu {
     pub screen: [bool; SCREEN_WIDTH * SCREEN_HEIGHT],
     pub prev_screen: [bool; SCREEN_WIDTH * SCREEN_HEIGHT],
     keys: [bool; 16],
+    prev_keys: [bool; 16],  // Onceki frame'deki tuş durumu
+    waiting_for_key_release: Option<u8>,  // FX0A için tuş bırakma bekleme
     v: [u8; 16],
     i: usize,
 
@@ -53,6 +55,7 @@ impl Cpu {
     }
 
     pub fn keypress(&mut self, key: usize, pressed: bool) {
+        self.prev_keys[key] = self.keys[key];
         self.keys[key] = pressed;
     }
     pub fn new() -> Cpu {
@@ -64,6 +67,8 @@ impl Cpu {
             screen: [false; SCREEN_WIDTH * SCREEN_HEIGHT],
             prev_screen: [false; SCREEN_WIDTH * SCREEN_HEIGHT],
             keys: [false; 16],
+            prev_keys: [false; 16],
+            waiting_for_key_release: None,
             v: [0; 16],
             i: 0,
 
@@ -86,6 +91,9 @@ impl Cpu {
         self.sp = 0;
         self.screen = [false; SCREEN_WIDTH * SCREEN_HEIGHT];
         self.prev_screen = [false; SCREEN_WIDTH * SCREEN_HEIGHT];
+        self.keys = [false; 16];
+        self.prev_keys = [false; 16];
+        self.waiting_for_key_release = None;
         self.v = [0; 16];
         self.i = 0;
         self.st = 0;
@@ -113,7 +121,6 @@ impl Cpu {
     }
     pub fn tick(&mut self) {
         self.decode_opcode();
-        self.timers();
     }
     fn fetch_opcode(&mut self) -> u16 {
         let opcode =
@@ -350,16 +357,32 @@ impl Cpu {
     }
     fn op_fx0a(&mut self, opcode: u16) {
         let x = ((opcode & 0x0F00) >> 8) as usize;
-        let mut key_pressed = false;
+        
+        // Eger bir tus birakilmasini bekliyorsak
+        if let Some(key) = self.waiting_for_key_release {
+            // Tus birakildi mi kontrol et
+            if !self.keys[key as usize] {
+                self.v[x] = key;
+                self.waiting_for_key_release = None;
+                return;
+            }
+            // Hala basili, bekle
+            self.pc -= 2;
+            return;
+        }
+        
+        // Yeni tus basildi mi kontrol et
         for i in 0..16 {
-            if self.keys[i] {
-                self.v[x] = i as u8;
-                key_pressed = true;
+            if self.keys[i] && !self.prev_keys[i] {
+                // Tus yeni basildi, birakilmasini bekle
+                self.waiting_for_key_release = Some(i as u8);
+                self.pc -= 2;
+                return;
             }
         }
-        if !key_pressed {
-            self.pc -= 2;
-        }
+        
+        // Hic tus basilmadi, bekle
+        self.pc -= 2;
     }
     fn op_fx15(&mut self, opcode: u16) {
         let x = ((opcode & 0x0F00) >> 8) as usize;
@@ -395,6 +418,452 @@ impl Cpu {
         for i in 0..=x {
             self.v[i] = self.memory[self.i + i];
         }
-        println!("{:?}", self.v);
+    }
+
+    // Test helper: opcode'u memory'ye yaz ve calistir
+    #[cfg(test)]
+    pub fn execute_opcode(&mut self, opcode: u16) {
+        self.memory[self.pc as usize] = (opcode >> 8) as u8;
+        self.memory[self.pc as usize + 1] = (opcode & 0xFF) as u8;
+        self.decode_opcode();
+    }
+
+    // Test helper: register degerini al
+    #[cfg(test)]
+    pub fn get_v(&self, x: usize) -> u8 {
+        self.v[x]
+    }
+
+    // Test helper: register degerini ayarla
+    #[cfg(test)]
+    pub fn set_v(&mut self, x: usize, val: u8) {
+        self.v[x] = val;
+    }
+
+    // Test helper: I register degerini al
+    #[cfg(test)]
+    pub fn get_i(&self) -> usize {
+        self.i
+    }
+
+    // Test helper: PC degerini al
+    #[cfg(test)]
+    pub fn get_pc(&self) -> u16 {
+        self.pc
+    }
+
+    // Test helper: PC degerini ayarla
+    #[cfg(test)]
+    pub fn set_pc(&mut self, pc: u16) {
+        self.pc = pc;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // ==================== CPU OPCODE TESTLERI ====================
+
+    #[test]
+    fn test_op_00e0_clear_screen() {
+        let mut cpu = Cpu::new();
+        // Ekrani doldur
+        cpu.screen = [true; SCREEN_WIDTH * SCREEN_HEIGHT];
+        // 00E0 - CLS
+        cpu.execute_opcode(0x00E0);
+        // Ekran temizlenmeli
+        assert!(cpu.screen.iter().all(|&p| !p));
+    }
+
+    #[test]
+    fn test_op_1nnn_jump() {
+        let mut cpu = Cpu::new();
+        // 1NNN - JP addr
+        cpu.execute_opcode(0x1ABC);
+        assert_eq!(cpu.get_pc(), 0xABC);
+    }
+
+    #[test]
+    fn test_op_2nnn_call_subroutine() {
+        let mut cpu = Cpu::new();
+        let initial_pc = cpu.get_pc();
+        // 2NNN - CALL addr
+        cpu.execute_opcode(0x2345);
+        assert_eq!(cpu.get_pc(), 0x345);
+        // Stack'te eski PC olmali
+        assert_eq!(cpu.stack[cpu.sp as usize], initial_pc + 2);
+    }
+
+    #[test]
+    fn test_op_00ee_return() {
+        let mut cpu = Cpu::new();
+        // Once subroutine cagir
+        cpu.execute_opcode(0x2400);
+        // Sonra don
+        cpu.execute_opcode(0x00EE);
+        // PC eski yerine donmeli (0x200 + 2 = 0x202)
+        assert_eq!(cpu.get_pc(), 0x202);
+    }
+
+    #[test]
+    fn test_op_3xkk_skip_if_equal() {
+        let mut cpu = Cpu::new();
+        cpu.set_v(0, 0x42);
+        let pc_before = cpu.get_pc();
+        // 3XKK - SE Vx, byte (esitse atla)
+        cpu.execute_opcode(0x3042);
+        // Esit oldugu icin 4 byte atlamali (2 opcode + 2 skip)
+        assert_eq!(cpu.get_pc(), pc_before + 4);
+    }
+
+    #[test]
+    fn test_op_3xkk_no_skip_if_not_equal() {
+        let mut cpu = Cpu::new();
+        cpu.set_v(0, 0x42);
+        let pc_before = cpu.get_pc();
+        // Esit degil
+        cpu.execute_opcode(0x3043);
+        assert_eq!(cpu.get_pc(), pc_before + 2);
+    }
+
+    #[test]
+    fn test_op_4xkk_skip_if_not_equal() {
+        let mut cpu = Cpu::new();
+        cpu.set_v(0, 0x42);
+        let pc_before = cpu.get_pc();
+        // 4XKK - SNE Vx, byte
+        cpu.execute_opcode(0x4043);
+        assert_eq!(cpu.get_pc(), pc_before + 4);
+    }
+
+    #[test]
+    fn test_op_5xy0_skip_if_vx_eq_vy() {
+        let mut cpu = Cpu::new();
+        cpu.set_v(0, 0x42);
+        cpu.set_v(1, 0x42);
+        let pc_before = cpu.get_pc();
+        // 5XY0 - SE Vx, Vy
+        cpu.execute_opcode(0x5010);
+        assert_eq!(cpu.get_pc(), pc_before + 4);
+    }
+
+    #[test]
+    fn test_op_6xkk_load_byte() {
+        let mut cpu = Cpu::new();
+        // 6XKK - LD Vx, byte
+        cpu.execute_opcode(0x6A42);
+        assert_eq!(cpu.get_v(0xA), 0x42);
+    }
+
+    #[test]
+    fn test_op_7xkk_add_byte() {
+        let mut cpu = Cpu::new();
+        cpu.set_v(0, 0x10);
+        // 7XKK - ADD Vx, byte
+        cpu.execute_opcode(0x7005);
+        assert_eq!(cpu.get_v(0), 0x15);
+    }
+
+    #[test]
+    fn test_op_7xkk_add_overflow() {
+        let mut cpu = Cpu::new();
+        cpu.set_v(0, 0xFF);
+        cpu.execute_opcode(0x7002);
+        assert_eq!(cpu.get_v(0), 0x01); // Wrap around
+    }
+
+    #[test]
+    fn test_op_8xy0_load_vy_to_vx() {
+        let mut cpu = Cpu::new();
+        cpu.set_v(1, 0x42);
+        // 8XY0 - LD Vx, Vy
+        cpu.execute_opcode(0x8010);
+        assert_eq!(cpu.get_v(0), 0x42);
+    }
+
+    #[test]
+    fn test_op_8xy1_or() {
+        let mut cpu = Cpu::new();
+        cpu.set_v(0, 0x0F);
+        cpu.set_v(1, 0xF0);
+        // 8XY1 - OR Vx, Vy
+        cpu.execute_opcode(0x8011);
+        assert_eq!(cpu.get_v(0), 0xFF);
+    }
+
+    #[test]
+    fn test_op_8xy2_and() {
+        let mut cpu = Cpu::new();
+        cpu.set_v(0, 0x0F);
+        cpu.set_v(1, 0xFF);
+        // 8XY2 - AND Vx, Vy
+        cpu.execute_opcode(0x8012);
+        assert_eq!(cpu.get_v(0), 0x0F);
+    }
+
+    #[test]
+    fn test_op_8xy3_xor() {
+        let mut cpu = Cpu::new();
+        cpu.set_v(0, 0xFF);
+        cpu.set_v(1, 0x0F);
+        // 8XY3 - XOR Vx, Vy
+        cpu.execute_opcode(0x8013);
+        assert_eq!(cpu.get_v(0), 0xF0);
+    }
+
+    #[test]
+    fn test_op_8xy4_add_no_carry() {
+        let mut cpu = Cpu::new();
+        cpu.set_v(0, 0x10);
+        cpu.set_v(1, 0x20);
+        // 8XY4 - ADD Vx, Vy
+        cpu.execute_opcode(0x8014);
+        assert_eq!(cpu.get_v(0), 0x30);
+        assert_eq!(cpu.get_v(0xF), 0); // No carry
+    }
+
+    #[test]
+    fn test_op_8xy4_add_with_carry() {
+        let mut cpu = Cpu::new();
+        cpu.set_v(0, 0xFF);
+        cpu.set_v(1, 0x02);
+        cpu.execute_opcode(0x8014);
+        assert_eq!(cpu.get_v(0), 0x01);
+        assert_eq!(cpu.get_v(0xF), 1); // Carry
+    }
+
+    #[test]
+    fn test_op_8xy5_sub_no_borrow() {
+        let mut cpu = Cpu::new();
+        cpu.set_v(0, 0x20);
+        cpu.set_v(1, 0x10);
+        // 8XY5 - SUB Vx, Vy
+        cpu.execute_opcode(0x8015);
+        assert_eq!(cpu.get_v(0), 0x10);
+        assert_eq!(cpu.get_v(0xF), 1); // No borrow
+    }
+
+    #[test]
+    fn test_op_8xy5_sub_with_borrow() {
+        let mut cpu = Cpu::new();
+        cpu.set_v(0, 0x10);
+        cpu.set_v(1, 0x20);
+        cpu.execute_opcode(0x8015);
+        assert_eq!(cpu.get_v(0), 0xF0); // Wrap
+        assert_eq!(cpu.get_v(0xF), 0); // Borrow
+    }
+
+    #[test]
+    fn test_op_8xy6_shift_right() {
+        let mut cpu = Cpu::new();
+        cpu.set_v(0, 0b00000011);
+        // 8XY6 - SHR Vx
+        cpu.execute_opcode(0x8006);
+        assert_eq!(cpu.get_v(0), 0b00000001);
+        assert_eq!(cpu.get_v(0xF), 1); // LSB was 1
+    }
+
+    #[test]
+    fn test_op_8xye_shift_left() {
+        let mut cpu = Cpu::new();
+        cpu.set_v(0, 0b10000001);
+        // 8XYE - SHL Vx
+        cpu.execute_opcode(0x800E);
+        assert_eq!(cpu.get_v(0), 0b00000010);
+        assert_eq!(cpu.get_v(0xF), 1); // MSB was 1
+    }
+
+    #[test]
+    fn test_op_9xy0_skip_if_vx_ne_vy() {
+        let mut cpu = Cpu::new();
+        cpu.set_v(0, 0x42);
+        cpu.set_v(1, 0x43);
+        let pc_before = cpu.get_pc();
+        // 9XY0 - SNE Vx, Vy
+        cpu.execute_opcode(0x9010);
+        assert_eq!(cpu.get_pc(), pc_before + 4);
+    }
+
+    #[test]
+    fn test_op_annn_load_i() {
+        let mut cpu = Cpu::new();
+        // ANNN - LD I, addr
+        cpu.execute_opcode(0xA123);
+        assert_eq!(cpu.get_i(), 0x123);
+    }
+
+    #[test]
+    fn test_op_bnnn_jump_v0() {
+        let mut cpu = Cpu::new();
+        cpu.set_v(0, 0x10);
+        // BNNN - JP V0, addr
+        cpu.execute_opcode(0xB100);
+        assert_eq!(cpu.get_pc(), 0x110);
+    }
+
+    #[test]
+    fn test_op_fx1e_add_i() {
+        let mut cpu = Cpu::new();
+        cpu.i = 0x100;
+        cpu.set_v(0, 0x10);
+        // FX1E - ADD I, Vx
+        cpu.execute_opcode(0xF01E);
+        assert_eq!(cpu.get_i(), 0x110);
+    }
+
+    #[test]
+    fn test_op_fx33_bcd() {
+        let mut cpu = Cpu::new();
+        cpu.i = 0x300;
+        cpu.set_v(0, 234);
+        // FX33 - LD B, Vx
+        cpu.execute_opcode(0xF033);
+        assert_eq!(cpu.memory[0x300], 2); // Yuzler
+        assert_eq!(cpu.memory[0x301], 3); // Onlar
+        assert_eq!(cpu.memory[0x302], 4); // Birler
+    }
+
+    #[test]
+    fn test_op_fx55_store_registers() {
+        let mut cpu = Cpu::new();
+        cpu.i = 0x300;
+        cpu.set_v(0, 1);
+        cpu.set_v(1, 2);
+        cpu.set_v(2, 3);
+        // FX55 - LD [I], Vx
+        cpu.execute_opcode(0xF255);
+        assert_eq!(cpu.memory[0x300], 1);
+        assert_eq!(cpu.memory[0x301], 2);
+        assert_eq!(cpu.memory[0x302], 3);
+    }
+
+    #[test]
+    fn test_op_fx65_load_registers() {
+        let mut cpu = Cpu::new();
+        cpu.i = 0x300;
+        cpu.memory[0x300] = 10;
+        cpu.memory[0x301] = 20;
+        cpu.memory[0x302] = 30;
+        // FX65 - LD Vx, [I]
+        cpu.execute_opcode(0xF265);
+        assert_eq!(cpu.get_v(0), 10);
+        assert_eq!(cpu.get_v(1), 20);
+        assert_eq!(cpu.get_v(2), 30);
+    }
+
+    // ==================== TIMER TESTLERI ====================
+
+    #[test]
+    fn test_timer_delay_decrement() {
+        let mut cpu = Cpu::new();
+        cpu.dt = 10;
+        cpu.timers();
+        assert_eq!(cpu.dt, 9);
+    }
+
+    #[test]
+    fn test_timer_sound_decrement() {
+        let mut cpu = Cpu::new();
+        cpu.st = 5;
+        cpu.timers();
+        assert_eq!(cpu.st, 4);
+    }
+
+    #[test]
+    fn test_timer_no_underflow() {
+        let mut cpu = Cpu::new();
+        cpu.dt = 0;
+        cpu.st = 0;
+        cpu.timers();
+        assert_eq!(cpu.dt, 0);
+        assert_eq!(cpu.st, 0);
+    }
+
+    #[test]
+    fn test_op_fx07_get_delay() {
+        let mut cpu = Cpu::new();
+        cpu.dt = 0x42;
+        // FX07 - LD Vx, DT
+        cpu.execute_opcode(0xF007);
+        assert_eq!(cpu.get_v(0), 0x42);
+    }
+
+    #[test]
+    fn test_op_fx15_set_delay() {
+        let mut cpu = Cpu::new();
+        cpu.set_v(0, 0x30);
+        // FX15 - LD DT, Vx
+        cpu.execute_opcode(0xF015);
+        assert_eq!(cpu.dt, 0x30);
+    }
+
+    #[test]
+    fn test_op_fx18_set_sound() {
+        let mut cpu = Cpu::new();
+        cpu.set_v(0, 0x20);
+        // FX18 - LD ST, Vx
+        cpu.execute_opcode(0xF018);
+        assert_eq!(cpu.st, 0x20);
+    }
+
+    // ==================== DISPLAY TESTLERI ====================
+
+    #[test]
+    fn test_screen_initial_state() {
+        let cpu = Cpu::new();
+        assert!(cpu.screen.iter().all(|&p| !p));
+    }
+
+    #[test]
+    fn test_reset_clears_screen() {
+        let mut cpu = Cpu::new();
+        cpu.screen[0] = true;
+        cpu.screen[100] = true;
+        cpu.reset();
+        assert!(cpu.screen.iter().all(|&p| !p));
+    }
+
+    #[test]
+    fn test_op_fx29_font_sprite() {
+        let mut cpu = Cpu::new();
+        cpu.set_v(0, 0x5); // Sprite for '5'
+        // FX29 - LD F, Vx
+        cpu.execute_opcode(0xF029);
+        // Font sprite 5 = 5 * 5 = 25
+        assert_eq!(cpu.get_i(), 25);
+    }
+
+    // ==================== KEYBOARD TESTLERI ====================
+
+    #[test]
+    fn test_keypress() {
+        let mut cpu = Cpu::new();
+        cpu.keypress(0x5, true);
+        assert!(cpu.keys[0x5]);
+        cpu.keypress(0x5, false);
+        assert!(!cpu.keys[0x5]);
+    }
+
+    #[test]
+    fn test_op_ex9e_skip_if_key_pressed() {
+        let mut cpu = Cpu::new();
+        cpu.set_v(0, 0x5);
+        cpu.keypress(0x5, true);
+        let pc_before = cpu.get_pc();
+        // EX9E - SKP Vx
+        cpu.execute_opcode(0xE09E);
+        assert_eq!(cpu.get_pc(), pc_before + 4);
+    }
+
+    #[test]
+    fn test_op_exa1_skip_if_key_not_pressed() {
+        let mut cpu = Cpu::new();
+        cpu.set_v(0, 0x5);
+        cpu.keypress(0x5, false);
+        let pc_before = cpu.get_pc();
+        // EXA1 - SKNP Vx
+        cpu.execute_opcode(0xE0A1);
+        assert_eq!(cpu.get_pc(), pc_before + 4);
     }
 }

@@ -29,8 +29,8 @@ pub struct Cpu {
     pub screen: [bool; SCREEN_WIDTH * SCREEN_HEIGHT],
     pub prev_screen: [bool; SCREEN_WIDTH * SCREEN_HEIGHT],
     keys: [bool; 16],
-    prev_keys: [bool; 16],  // Onceki frame'deki tuş durumu
-    waiting_for_key_release: Option<u8>,  // FX0A için tuş bırakma bekleme
+    prev_keys: [bool; 16],
+    waiting_for_key_release: Option<u8>,
     v: [u8; 16],
     i: usize,
 
@@ -204,7 +204,6 @@ impl Cpu {
         }
     }
     fn op_4xkk(&mut self, opcode: u16) {
-        //skip next instruction if Vx != kk
         let x = ((opcode & 0x0F00) >> 8) as usize;
         let kk = (opcode & 0x00FF) as u8;
         if self.v[x] != kk {
@@ -212,7 +211,6 @@ impl Cpu {
         }
     }
     fn op_5xy0(&mut self, opcode: u16) {
-        //skip next instruction if Vx = Vy
         let x = ((opcode & 0x0F00) >> 8) as usize;
         let y = ((opcode & 0x00F0) >> 4) as usize;
         if self.v[x] == self.v[y] {
@@ -358,30 +356,24 @@ impl Cpu {
     fn op_fx0a(&mut self, opcode: u16) {
         let x = ((opcode & 0x0F00) >> 8) as usize;
         
-        // Eger bir tus birakilmasini bekliyorsak
         if let Some(key) = self.waiting_for_key_release {
-            // Tus birakildi mi kontrol et
             if !self.keys[key as usize] {
                 self.v[x] = key;
                 self.waiting_for_key_release = None;
                 return;
             }
-            // Hala basili, bekle
             self.pc -= 2;
             return;
         }
         
-        // Yeni tus basildi mi kontrol et
         for i in 0..16 {
             if self.keys[i] && !self.prev_keys[i] {
-                // Tus yeni basildi, birakilmasini bekle
                 self.waiting_for_key_release = Some(i as u8);
                 self.pc -= 2;
                 return;
             }
         }
         
-        // Hic tus basilmadi, bekle
         self.pc -= 2;
     }
     fn op_fx15(&mut self, opcode: u16) {
@@ -420,7 +412,6 @@ impl Cpu {
         }
     }
 
-    // Test helper: opcode'u memory'ye yaz ve calistir
     #[cfg(test)]
     pub fn execute_opcode(&mut self, opcode: u16) {
         self.memory[self.pc as usize] = (opcode >> 8) as u8;
@@ -428,31 +419,26 @@ impl Cpu {
         self.decode_opcode();
     }
 
-    // Test helper: register degerini al
     #[cfg(test)]
     pub fn get_v(&self, x: usize) -> u8 {
         self.v[x]
     }
 
-    // Test helper: register degerini ayarla
     #[cfg(test)]
     pub fn set_v(&mut self, x: usize, val: u8) {
         self.v[x] = val;
     }
 
-    // Test helper: I register degerini al
     #[cfg(test)]
     pub fn get_i(&self) -> usize {
         self.i
     }
 
-    // Test helper: PC degerini al
     #[cfg(test)]
     pub fn get_pc(&self) -> u16 {
         self.pc
     }
 
-    // Test helper: PC degerini ayarla
     #[cfg(test)]
     pub fn set_pc(&mut self, pc: u16) {
         self.pc = pc;
@@ -463,16 +449,12 @@ impl Cpu {
 mod tests {
     use super::*;
 
-    // ==================== CPU OPCODE TESTLERI ====================
 
     #[test]
     fn test_op_00e0_clear_screen() {
         let mut cpu = Cpu::new();
-        // Ekrani doldur
         cpu.screen = [true; SCREEN_WIDTH * SCREEN_HEIGHT];
-        // 00E0 - CLS
         cpu.execute_opcode(0x00E0);
-        // Ekran temizlenmeli
         assert!(cpu.screen.iter().all(|&p| !p));
     }
 
@@ -488,21 +470,16 @@ mod tests {
     fn test_op_2nnn_call_subroutine() {
         let mut cpu = Cpu::new();
         let initial_pc = cpu.get_pc();
-        // 2NNN - CALL addr
         cpu.execute_opcode(0x2345);
         assert_eq!(cpu.get_pc(), 0x345);
-        // Stack'te eski PC olmali
         assert_eq!(cpu.stack[cpu.sp as usize], initial_pc + 2);
     }
 
     #[test]
     fn test_op_00ee_return() {
         let mut cpu = Cpu::new();
-        // Once subroutine cagir
         cpu.execute_opcode(0x2400);
-        // Sonra don
         cpu.execute_opcode(0x00EE);
-        // PC eski yerine donmeli (0x200 + 2 = 0x202)
         assert_eq!(cpu.get_pc(), 0x202);
     }
 
@@ -511,9 +488,7 @@ mod tests {
         let mut cpu = Cpu::new();
         cpu.set_v(0, 0x42);
         let pc_before = cpu.get_pc();
-        // 3XKK - SE Vx, byte (esitse atla)
         cpu.execute_opcode(0x3042);
-        // Esit oldugu icin 4 byte atlamali (2 opcode + 2 skip)
         assert_eq!(cpu.get_pc(), pc_before + 4);
     }
 
@@ -522,7 +497,6 @@ mod tests {
         let mut cpu = Cpu::new();
         cpu.set_v(0, 0x42);
         let pc_before = cpu.get_pc();
-        // Esit degil
         cpu.execute_opcode(0x3043);
         assert_eq!(cpu.get_pc(), pc_before + 2);
     }
@@ -719,9 +693,9 @@ mod tests {
         cpu.set_v(0, 234);
         // FX33 - LD B, Vx
         cpu.execute_opcode(0xF033);
-        assert_eq!(cpu.memory[0x300], 2); // Yuzler
-        assert_eq!(cpu.memory[0x301], 3); // Onlar
-        assert_eq!(cpu.memory[0x302], 4); // Birler
+        assert_eq!(cpu.memory[0x300], 2);
+        assert_eq!(cpu.memory[0x301], 3);
+        assert_eq!(cpu.memory[0x302], 4);
     }
 
     #[test]
@@ -751,8 +725,6 @@ mod tests {
         assert_eq!(cpu.get_v(1), 20);
         assert_eq!(cpu.get_v(2), 30);
     }
-
-    // ==================== TIMER TESTLERI ====================
 
     #[test]
     fn test_timer_delay_decrement() {
@@ -807,7 +779,6 @@ mod tests {
         assert_eq!(cpu.st, 0x20);
     }
 
-    // ==================== DISPLAY TESTLERI ====================
 
     #[test]
     fn test_screen_initial_state() {
@@ -834,7 +805,6 @@ mod tests {
         assert_eq!(cpu.get_i(), 25);
     }
 
-    // ==================== KEYBOARD TESTLERI ====================
 
     #[test]
     fn test_keypress() {

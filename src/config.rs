@@ -113,10 +113,10 @@ impl Config {
         }
         
         let content = fs::read_to_string(path)
-            .map_err(|e| format!("Config dosyasi okunamadi: {}", e))?;
+            .map_err(|e| format!("Could not read config file: {}", e))?;
         
         toml::from_str(&content)
-            .map_err(|e| format!("Config parse hatasi: {}", e))
+            .map_err(|e| format!("Config parse error: {}", e))
     }
     
     pub fn get_keycode(&self, key_name: &str) -> Option<usize> {
@@ -124,24 +124,24 @@ impl Config {
     }
 }
 
-/// Ornek config dosyasi olustur
+/// Create example config file
 pub fn create_example_config(path: &Path) -> std::io::Result<()> {
-    let example = r#"# Chiki8 CHIP-8 Emulator Yapilandirma Dosyasi
+    let example = r#"# Chiki8 CHIP-8 Emulator Configuration File
 
 [display]
 scale = 15
-background = [0, 0, 0]       # Siyah arka plan
-foreground = [255, 255, 255] # Beyaz on plan
+background = [0, 0, 0]       # Black background
+foreground = [255, 255, 255] # White foreground
 
 [audio]
-volume = 25  # 0-100 arasi
+volume = 25  # 0-100 range
 
 [emulation]
-speed = 10   # Tick sayisi
+speed = 10   # Ticks per frame
 
 [keymap]
-# CHIP-8 tuslari -> Klavye tuslari
-# Format: "KLAVYE_TUSU" = CHIP8_DEGERI (hex)
+# CHIP-8 keys -> Keyboard keys
+# Format: "KEYBOARD_KEY" = CHIP8_VALUE (hex)
 [keymap.keys]
 "1" = 0x1
 "2" = 0x2

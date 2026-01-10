@@ -1,21 +1,21 @@
 // CHIP-8 Emulator - chiki8
 // ========================
-// Kullanim: cargo run -- -f <rom_dosyasi> [secenekler]
+// Usage: cargo run -- -f <rom_file> [options]
 //
-// Secenekler:
-//   -f, --file       ROM dosyasi (zorunlu)
-//   -s, --scale      Piksel olcegi (varsayilan: 15)
-//   -p, --speed      Hiz carpani (varsayilan: 10)
-//   -v, --volume     Ses seviyesi 0-100 (varsayilan: 25)
-//   -b, --background Arka plan rengi R,G,B (varsayilan: 0,0,0)
-//   -c, --color      On plan rengi R,G,B (varsayilan: 255,255,255)
-//   --config         Config dosyasi yolu
-//   --create-config  Ornek config dosyasi olustur
+// Options:
+//   -f, --file       ROM file (required)
+//   -s, --scale      Pixel scale (default: 15)
+//   -p, --speed      Speed multiplier (default: 10)
+//   -v, --volume     Volume level 0-100 (default: 25)
+//   -b, --background Background color R,G,B (default: 0,0,0)
+//   -c, --color      Foreground color R,G,B (default: 255,255,255)
+//   --config         Config file path
+//   --create-config  Create example config file
 //
 // TODO: Add tests
-//   - [x] cpu opcode testleri
-//   - [x] timer testleri
-//   - [x] display testleri
+//   - [x] cpu opcode tests
+//   - [x] timer tests
+//   - [x] display tests
 
 #![allow(dead_code)]
 #![allow(unused_imports)]
@@ -43,9 +43,9 @@ fn print_keymap(keymap: &HashMap<String, u8>) {
     println!("\n╔════════════════════════════════════════════════════════════╗");
     println!("║                    CHIKI8 - CHIP-8 Emulator                ║");
     println!("╠════════════════════════════════════════════════════════════╣");
-    println!("║  Klavye Haritasi:                                          ║");
+    println!("║  Keyboard Mapping:                                         ║");
     println!("║                                                            ║");
-    println!("║  CHIP-8:          Klavye:                                  ║");
+    println!("║  CHIP-8:          Keyboard:                                ║");
     println!("║  ┌───┬───┬───┬───┐    ┌───┬───┬───┬───┐                    ║");
     println!("║  │ 1 │ 2 │ 3 │ C │    │ 1 │ 2 │ 3 │ 4 │                    ║");
     println!("║  ├───┼───┼───┼───┤    ├───┼───┼───┼───┤                    ║");
@@ -56,7 +56,7 @@ fn print_keymap(keymap: &HashMap<String, u8>) {
     println!("║  │ A │ 0 │ B │ F │    │ Z │ X │ C │ V │                    ║");
     println!("║  └───┴───┴───┴───┘    └───┴───┴───┴───┘                    ║");
     println!("║                                                            ║");
-    println!("║  Cikmak icin: Pencereyi kapatin veya ESC                   ║");
+    println!("║  To exit: Close the window or press ESC                    ║");
     println!("╚════════════════════════════════════════════════════════════╝\n");
 }
 
@@ -149,72 +149,67 @@ fn parse_color(s: &str) -> [u8; 3] {
 }
 
 fn main() {
-    // Wayland'de SDL2 event sorunlari oldugu icin x11 kullaniyoruz
     env::set_var("SDL_VIDEODRIVER", "x11");
     let args: Vec<String> = env::args().collect();
     let mut opts = Options::new();
-    opts.optopt("f", "file", "ROM dosyasi", "FILE");
-    opts.optopt("s", "scale", "Piksel olcegi (varsayilan: 15)", "SCALE");
-    opts.optopt("p", "speed", "Hiz carpani (varsayilan: 10)", "SPEED");
-    opts.optopt("v", "volume", "Ses seviyesi 0-100 (varsayilan: 25)", "VOLUME");
+    opts.optopt("f", "file", "ROM file", "FILE");
+    opts.optopt("s", "scale", "Pixel scale (default: 15)", "SCALE");
+    opts.optopt("p", "speed", "Speed multiplier (default: 10)", "SPEED");
+    opts.optopt("v", "volume", "Volume level 0-100 (default: 25)", "VOLUME");
     opts.optopt(
         "b",
         "background",
-        "Arka plan rengi R,G,B (varsayilan: 0,0,0)",
+        "Background color R,G,B (default: 0,0,0)",
         "COLOR",
     );
     opts.optopt(
         "c",
         "color",
-        "On plan rengi R,G,B (varsayilan: 255,255,255)",
+        "Foreground color R,G,B (default: 255,255,255)",
         "COLOR",
     );
-    opts.optopt("", "config", "Config dosyasi yolu", "PATH");
-    opts.optflag("", "create-config", "Ornek config dosyasi olustur");
-    opts.optflag("", "help", "Yardim mesajini goster");
+    opts.optopt("", "config", "Config file path", "PATH");
+    opts.optflag("", "create-config", "Create example config file");
+    opts.optflag("", "help", "Show help message");
 
     let matches = match opts.parse(&args[1..]) {
         Ok(m) => m,
         Err(f) => panic!("{}", f),
     };
 
-    // Ornek config dosyasi olustur
     if matches.opt_present("create-config") {
         let config_path = Path::new("chiki8.toml");
         match config::create_example_config(config_path) {
             Ok(_) => {
-                println!("Ornek config dosyasi olusturuldu: chiki8.toml");
+                println!("Example config file created: chiki8.toml");
                 return;
             }
             Err(e) => {
-                eprintln!("Config dosyasi olusturulamadi: {}", e);
+                eprintln!("Could not create config file: {}", e);
                 return;
             }
         }
     }
 
-    // Config dosyasini yukle
     let config_path = matches.opt_str("config").unwrap_or_else(|| "chiki8.toml".to_string());
     let config = Config::load(Path::new(&config_path)).unwrap_or_else(|e| {
-        eprintln!("Config yuklenemedi, varsayilan ayarlar kullaniliyor: {}", e);
+        eprintln!("Could not load config, using defaults: {}", e);
         Config::default()
     });
 
     if matches.opt_present("help") {
         print_keymap(&config.keymap.keys);
-        println!("Kullanim: {} -f <rom_dosyasi> [secenekler]", args[0]);
+        println!("Usage: {} -f <rom_file> [options]", args[0]);
         println!("{}", opts.usage(""));
         return;
     }
 
-    // Tus haritasini goster
     print_keymap(&config.keymap.keys);
 
     let file_path: String = matches
         .opt_str("f")
-        .expect("Lutfen ROM dosyasi belirtin: -f <dosya_yolu>");
+        .expect("Please specify ROM file: -f <file_path>");
 
-    // Komut satiri argumanlari config'den oncelikli
     let scale: u32 = matches
         .opt_str("s")
         .map(|s| s.parse().unwrap_or(config.display.scale))
@@ -242,15 +237,15 @@ fn main() {
         .unwrap_or(config.display.foreground);
 
     println!("ROM: {}", file_path);
-    println!("Olcek: {}x", scale);
-    println!("Hiz: {}x", speed);
-    println!("Ses: {}%", volume);
+    println!("Scale: {}x", scale);
+    println!("Speed: {}x", speed);
+    println!("Volume: {}%", volume);
     println!(
-        "Arka plan: RGB({}, {}, {})",
+        "Background: RGB({}, {}, {})",
         background_color[0], background_color[1], background_color[2]
     );
     println!(
-        "On plan: RGB({}, {}, {})",
+        "Foreground: RGB({}, {}, {})",
         foreground_color[0], foreground_color[1], foreground_color[2]
     );
     if Path::new(&config_path).exists() {
@@ -279,9 +274,8 @@ fn main() {
     canvas.present();
     let mut event_pump = sdl_context.event_pump().unwrap();
 
-    // 60Hz frame timing icin
     use std::time::Instant;
-    let frame_duration = Duration::from_micros(16667); // ~60 FPS
+    let frame_duration = Duration::from_micros(16667);
     let _last_frame = Instant::now();
 
     'emuloop: loop {
@@ -294,7 +288,7 @@ fn main() {
                 }
                 Event::KeyDown {
                     keycode: Some(key),
-                    repeat: false, // Tuş tekrarını engelle
+                    repeat: false,
                     ..
                 } => {
                     if key == Keycode::Escape {
@@ -319,25 +313,20 @@ fn main() {
             }
         }
         
-        // CPU ticks (speed kadar opcode calistir)
         for _ in 0..speed {
             cpu.tick();
         }
         
-        // Ekrani ciz
         draw_screen(&mut canvas, &cpu, &background_color, &foreground_color, scale);
         
-        // Timer'lari guncelle (60Hz)
         cpu.timers();
         
-        // Ses kontrolu
         if cpu.st > 0 {
             play_sound(&mut sound);
         } else {
             sound.device.pause()
         }
         
-        // Frame rate limiti
         let elapsed = frame_start.elapsed();
         if elapsed < frame_duration {
             thread::sleep(frame_duration - elapsed);

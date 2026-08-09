@@ -12,3 +12,6 @@ target/
 roms/
 roms/*
 
+
+# Local isolated worktrees
+.worktrees/

@@ -1,87 +1,128 @@
-# chiki8 🎮
+<!-- generated-by: gsd-doc-writer -->
+# chiki8
 
-A CHIP-8 emulator written in Rust.
+[![CI](https://github.com/frogiraffe/chiki8/actions/workflows/ci.yml/badge.svg)](https://github.com/frogiraffe/chiki8/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+[![Rust](https://img.shields.io/badge/Rust-2021-orange.svg)](https://www.rust-lang.org/)
 
-## Features
+A configurable desktop CHIP-8 emulator built with Rust and SDL2.
 
-- Full CHIP-8 instruction set implementation
-- Configurable display scaling and colors
-- Adjustable emulation speed
-- Sound support with volume control
-- TOML configuration file support
-- Customizable keyboard mapping
+chiki8 keeps the emulator core deliberately small: a 4 KiB virtual machine, 34 instruction handlers, a 64×32 display, 60 Hz timers, and deterministic unit tests around the machine state. SDL2 handles the native window, keyboard, rendering, and square-wave audio.
 
-## Installation
+## Highlights
+
+- Classic CHIP-8 CPU, memory, stack, timers, keypad, font sprites, and XOR drawing
+- Configurable scale, colors, emulation speed, volume, and key mapping
+- Safe ROM-size validation against the 3,584-byte program region
+- TOML configuration with CLI overrides
+- 49 unit tests plus rustfmt and strict Clippy checks in CI
+
+## Prerequisites
+
+- A stable Rust toolchain
+- SDL2 development libraries
+
+On Ubuntu/Debian:
 
 ```bash
-cargo build --release
+sudo apt-get install libsdl2-dev
 ```
+
+See [Getting Started](docs/GETTING-STARTED.md) for other platforms and troubleshooting.
+
+## Quick start
+
+1. Build the emulator:
+
+   ```bash
+   cargo build --release
+   ```
+
+2. Run a legally obtained CHIP-8 ROM:
+
+   ```bash
+   cargo run --release -- -f path/to/game.ch8
+   ```
+
+ROM files are intentionally not included in this repository.
 
 ## Usage
 
-```bash
-cargo run -- -f <rom_file> [options]
+```text
+cargo run --release -- -f <rom_file> [options]
+
+-f, --file FILE        ROM file (required)
+-s, --scale SCALE      Pixel scale (default: 15)
+-p, --speed SPEED      CPU cycles per frame (default: 10)
+-v, --volume VOLUME    Volume from 0 to 100 (default: 25)
+-b, --background COLOR Background color as R,G,B
+-c, --color COLOR      Foreground color as R,G,B
+    --config PATH       TOML configuration path
+    --create-config     Write an example chiki8.toml
+    --help              Show help
 ```
 
-### Options
-
-| Option | Description |
-|--------|-------------|
-| `-f, --file` | ROM file (required) |
-| `-s, --scale` | Pixel scale (default: 15) |
-| `-p, --speed` | Speed multiplier (default: 10) |
-| `-v, --volume` | Volume level 0-100 (default: 25) |
-| `-b, --background` | Background color R,G,B (default: 0,0,0) |
-| `-c, --color` | Foreground color R,G,B (default: 255,255,255) |
-| `--config` | Config file path |
-| `--create-config` | Create example config file |
-
-### Examples
+Examples:
 
 ```bash
-# Run a ROM with default settings
-cargo run -- -f roms/Pong\ \(1\ player\).ch8
+# Green pixels at 20× scale
+cargo run --release -- -f path/to/game.ch8 -s 20 -c 0,255,0
 
-# Run with custom scale and speed
-cargo run -- -f roms/Space\ Invaders\ \[David\ Winter\].ch8 -s 20 -p 15
+# Use a custom configuration file
+cargo run --release -- -f path/to/game.ch8 --config configs/fast.toml
 
-# Run with custom colors (green on black)
-cargo run -- -f roms/game.ch8 -c 0,255,0 -b 0,0,0
-```
-
-## Keyboard Mapping
-
-```
-CHIP-8:          Keyboard:
-┌───┬───┬───┬───┐    ┌───┬───┬───┬───┐
-│ 1 │ 2 │ 3 │ C │    │ 1 │ 2 │ 3 │ 4 │
-├───┼───┼───┼───┤    ├───┼───┼───┼───┤
-│ 4 │ 5 │ 6 │ D │    │ Q │ W │ E │ R │
-├───┼───┼───┼───┤    ├───┼───┼───┼───┤
-│ 7 │ 8 │ 9 │ E │    │ A │ S │ D │ F │
-├───┼───┼───┼───┤    ├───┼───┼───┼───┤
-│ A │ 0 │ B │ F │    │ Z │ X │ C │ V │
-└───┴───┴───┴───┘    └───┴───┴───┴───┘
-```
-
-Press `ESC` to exit.
-
-## Configuration
-
-Create a config file with:
-
-```bash
+# Generate a documented starter configuration
 cargo run -- --create-config
 ```
 
-This generates `chiki8.toml` with customizable settings for display, audio, emulation speed, and key mappings.
+## Keyboard
+
+```text
+CHIP-8           Keyboard
+1 2 3 C          1 2 3 4
+4 5 6 D          Q W E R
+7 8 9 E          A S D F
+A 0 B F          Z X C V
+```
+
+Press `Esc` or close the window to exit. Key assignments can be changed in TOML; see [Configuration](docs/CONFIGURATION.md).
+
+## Architecture
+
+```text
+ROM + TOML + CLI
+       │
+       ▼
+  CHIP-8 core ──► 64×32 framebuffer ──► SDL2 renderer
+       │
+       ├───────► keypad events ◄────── SDL2 input
+       └───────► sound timer ─────────► SDL2 audio
+```
+
+The CPU core is independent of SDL and directly unit-tested. The runtime loop composes configuration, input, CPU cycles, rendering, timers, and audio. See [Architecture](docs/ARCHITECTURE.md) for the complete flow.
+
+## Compatibility scope
+
+chiki8 targets the classic 64×32 CHIP-8 model. Shift instructions operate on `VX`, sprites wrap at display edges, and `FX55`/`FX65` leave `I` unchanged. SUPER-CHIP, XO-CHIP, and configurable quirk profiles are not implemented.
+
+The unit suite verifies individual machine-state transitions. The project does not yet publish results from an external compatibility ROM suite, so compatibility claims are intentionally bounded to the implemented and tested behavior.
+
+## Development
+
+```bash
+cargo fmt --check
+cargo test
+cargo clippy --all-targets --all-features -- -D warnings
+```
+
+More detail is available in [Development](docs/DEVELOPMENT.md) and [Testing](docs/TESTING.md).
 
 ## References
 
-- [CHIP-8 Technical Reference](http://devernay.free.fr/hacks/chip8/C8TECH10.HTM) by Jean-François Verrnay
-- [Write a Chip-8 Emulator](https://tobiasvl.github.io/blog/write-a-chip-8-emulator/) by Tobias Vermeulen
-- [Chip-8 Book](https://github.com/aquova/chip8-book) by aquova
+- [CHIP-8 Technical Reference](http://devernay.free.fr/hacks/chip8/C8TECH10.HTM)
+- [Write a CHIP-8 Emulator](https://tobiasvl.github.io/blog/write-a-chip-8-emulator/)
+- [CHIP-8 Book](https://github.com/aquova/chip8-book)
 
 ## License
 
-MIT
+Licensed under the [MIT License](LICENSE).

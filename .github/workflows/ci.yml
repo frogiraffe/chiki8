@@ -1,0 +1,24 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  quality:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install SDL2
+        run: sudo apt-get update && sudo apt-get install --yes libsdl2-dev
+      - name: Use stable Rust
+        run: rustup update stable && rustup default stable
+      - name: Check formatting
+        run: cargo fmt --check
+      - name: Run tests
+        run: cargo test --locked
+      - name: Run Clippy
+        run: cargo clippy --locked --all-targets --all-features -- -D warnings

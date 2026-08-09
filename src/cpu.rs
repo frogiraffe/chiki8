@@ -137,16 +137,17 @@ impl Cpu {
     pub fn decode_opcode(&mut self) {
         let opcode: u16 = self.fetch_opcode();
         match opcode & 0xF000 {
-            0x0000 => match opcode & 0x000F {
-                0x0000 => self.op_00e0(),
-                0x000E => self.op_00ee(),
+            0x0000 => match opcode {
+                0x00E0 => self.op_00e0(),
+                0x00EE => self.op_00ee(),
                 _ => println!("Unknown opcode: {:X}", opcode),
             },
             0x1000 => self.op_1nnn(opcode),
             0x2000 => self.op_2nnn(opcode),
             0x3000 => self.op_3xkk(opcode),
             0x4000 => self.op_4xkk(opcode),
-            0x5000 => self.op_5xy0(opcode),
+            0x5000 if opcode & 0x000F == 0 => self.op_5xy0(opcode),
+            0x5000 => println!("Unknown opcode: {:X}", opcode),
             0x6000 => self.op_6xkk(opcode),
             0x7000 => self.op_7xkk(opcode),
             0x8000 => match opcode & 0x000F {
@@ -161,7 +162,8 @@ impl Cpu {
                 0x000E => self.op_8xye(opcode),
                 _ => println!("Unknown opcode: {:X}", opcode),
             },
-            0x9000 => self.op_9xy0(opcode),
+            0x9000 if opcode & 0x000F == 0 => self.op_9xy0(opcode),
+            0x9000 => println!("Unknown opcode: {:X}", opcode),
             0xA000 => self.op_annn(opcode),
             0xB000 => self.op_bnnn(opcode),
             0xC000 => self.op_cxkk(opcode),
@@ -867,6 +869,40 @@ mod tests {
 
         assert!(result.is_err());
         assert_eq!(cpu.memory, memory_before);
+    }
+
+    #[test]
+    fn sys_instruction_does_not_clear_screen() {
+        let mut cpu = Cpu::new();
+        cpu.screen[0] = true;
+
+        cpu.execute_opcode(0x0120);
+
+        assert!(cpu.screen[0]);
+    }
+
+    #[test]
+    fn invalid_5xy_variant_does_not_skip() {
+        let mut cpu = Cpu::new();
+        cpu.set_v(0, 0x42);
+        cpu.set_v(1, 0x42);
+        let pc_before = cpu.get_pc();
+
+        cpu.execute_opcode(0x5011);
+
+        assert_eq!(cpu.get_pc(), pc_before + 2);
+    }
+
+    #[test]
+    fn invalid_9xy_variant_does_not_skip() {
+        let mut cpu = Cpu::new();
+        cpu.set_v(0, 0x42);
+        cpu.set_v(1, 0x43);
+        let pc_before = cpu.get_pc();
+
+        cpu.execute_opcode(0x9011);
+
+        assert_eq!(cpu.get_pc(), pc_before + 2);
     }
 
     #[test]

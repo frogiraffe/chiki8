@@ -1,8 +1,8 @@
 use rand::Rng;
-pub const SCALE: usize = 15;
+use std::path::Path;
 pub const SCREEN_WIDTH: usize = 64;
 pub const SCREEN_HEIGHT: usize = 32;
-const FONTSET_LEN: usize = 80;
+const PROGRAM_START: u16 = 0x200;
 const FONTSET: [u8; 80] = [
     0xF0, 0x90, 0x90, 0x90, 0xF0, // 0
     0x20, 0x60, 0x20, 0x20, 0x70, // 1
@@ -27,7 +27,6 @@ pub struct Cpu {
     stack: [u16; 16],
 
     pub screen: [bool; SCREEN_WIDTH * SCREEN_HEIGHT],
-    pub prev_screen: [bool; SCREEN_WIDTH * SCREEN_HEIGHT],
     keys: [bool; 16],
     prev_keys: [bool; 16],
     waiting_for_key_release: Option<u8>,
@@ -50,22 +49,21 @@ impl Cpu {
     pub fn get_display(&self) -> &[bool; SCREEN_WIDTH * SCREEN_HEIGHT] {
         &self.screen
     }
-    pub fn get_last_buf(&self) -> &[bool; SCREEN_WIDTH * SCREEN_HEIGHT] {
-        &self.prev_screen
-    }
-
     pub fn keypress(&mut self, key: usize, pressed: bool) {
-        self.prev_keys[key] = self.keys[key];
-        self.keys[key] = pressed;
+        if let (Some(previous), Some(current)) =
+            (self.prev_keys.get_mut(key), self.keys.get_mut(key))
+        {
+            *previous = *current;
+            *current = pressed;
+        }
     }
     pub fn new() -> Cpu {
-        Cpu {
-            pc: 0x200,
+        let mut cpu = Cpu {
+            pc: PROGRAM_START,
             stack: [0; 16],
             sp: 0,
 
             screen: [false; SCREEN_WIDTH * SCREEN_HEIGHT],
-            prev_screen: [false; SCREEN_WIDTH * SCREEN_HEIGHT],
             keys: [false; 16],
             prev_keys: [false; 16],
             waiting_for_key_release: None,
@@ -76,21 +74,16 @@ impl Cpu {
             dt: 0,
 
             memory: [0; 4096],
-        }
-    }
-
-    pub fn load_font(&mut self) {
-        (0..FONTSET_LEN).for_each(|i| {
-            self.memory[i] = FONTSET[i];
-        });
+        };
+        cpu.set_fontset();
+        cpu
     }
 
     pub fn reset(&mut self) {
-        self.pc = 0x200;
+        self.pc = PROGRAM_START;
         self.stack = [0; 16];
         self.sp = 0;
         self.screen = [false; SCREEN_WIDTH * SCREEN_HEIGHT];
-        self.prev_screen = [false; SCREEN_WIDTH * SCREEN_HEIGHT];
         self.keys = [false; 16];
         self.prev_keys = [false; 16];
         self.waiting_for_key_release = None;
@@ -99,12 +92,25 @@ impl Cpu {
         self.st = 0;
         self.dt = 0;
         self.memory = [0; 4096];
+        self.set_fontset();
     }
-    pub fn load(&mut self, path: &String) {
-        let rom = std::fs::read(path).unwrap();
-        for (i, byte) in rom.iter().enumerate() {
-            self.memory[i + self.pc as usize] = *byte;
+    pub fn load(&mut self, path: &Path) -> Result<(), String> {
+        let rom = std::fs::read(path)
+            .map_err(|error| format!("Could not read ROM '{}': {error}", path.display()))?;
+        self.load_rom(&rom)
+    }
+    fn load_rom(&mut self, rom: &[u8]) -> Result<(), String> {
+        let start = PROGRAM_START as usize;
+        let end = start + rom.len();
+        if end > self.memory.len() {
+            return Err(format!(
+                "ROM is {} bytes; maximum supported size is {} bytes",
+                rom.len(),
+                self.memory.len() - start
+            ));
         }
+        self.memory[start..end].copy_from_slice(rom);
+        Ok(())
     }
     fn set_fontset(&mut self) {
         for (i, &byte) in FONTSET.iter().enumerate() {
@@ -185,15 +191,15 @@ impl Cpu {
         self.screen = [false; SCREEN_WIDTH * SCREEN_HEIGHT];
     }
     fn op_00ee(&mut self) {
+        self.sp = self.sp.wrapping_sub(1);
         self.pc = self.stack[self.sp as usize];
-        self.sp = self.sp.wrapping_sub(1)
     }
     fn op_1nnn(&mut self, opcode: u16) {
         self.pc = opcode & 0x0FFF;
     }
     fn op_2nnn(&mut self, opcode: u16) {
-        self.sp = self.sp.wrapping_add(1);
         self.stack[self.sp as usize] = self.pc;
+        self.sp = self.sp.wrapping_add(1);
         self.pc = opcode & 0x0FFF;
     }
     fn op_3xkk(&mut self, opcode: u16) {
@@ -250,8 +256,6 @@ impl Cpu {
     fn op_8xy4(&mut self, opcode: u16) {
         let x = ((opcode & 0x0F00) >> 8) as usize;
         let y = ((opcode & 0x00F0) >> 4) as usize;
-        let vx = self.v[x] as u16;
-        let vy = self.v[y] as u16;
         let (new_vx, carry) = self.v[x].overflowing_add(self.v[y]);
         let new_vf = if carry { 1 } else { 0 };
         self.v[x] = new_vx;
@@ -260,8 +264,6 @@ impl Cpu {
     fn op_8xy5(&mut self, opcode: u16) {
         let x = ((opcode & 0x0F00) >> 8) as usize;
         let y = ((opcode & 0x00F0) >> 4) as usize;
-        let vx = self.v[x] as i8;
-        let vy = self.v[y] as i8;
         let (new_vx, borrow) = self.v[x].overflowing_sub(self.v[y]);
         let new_vf = if borrow { 0 } else { 1 };
         self.v[x] = new_vx;
@@ -338,14 +340,14 @@ impl Cpu {
     fn op_ex9e(&mut self, opcode: u16) {
         let x = ((opcode & 0x0F00) >> 8) as usize;
         let key = self.v[x] as usize;
-        if self.keys[key] {
+        if self.keys.get(key).copied().unwrap_or(false) {
             self.pc += 2;
         }
     }
     fn op_exa1(&mut self, opcode: u16) {
         let x = ((opcode & 0x0F00) >> 8) as usize;
         let key = self.v[x] as usize;
-        if !self.keys[key] {
+        if !self.keys.get(key).copied().unwrap_or(false) {
             self.pc += 2;
         }
     }
@@ -355,7 +357,7 @@ impl Cpu {
     }
     fn op_fx0a(&mut self, opcode: u16) {
         let x = ((opcode & 0x0F00) >> 8) as usize;
-        
+
         if let Some(key) = self.waiting_for_key_release {
             if !self.keys[key as usize] {
                 self.v[x] = key;
@@ -365,7 +367,7 @@ impl Cpu {
             self.pc -= 2;
             return;
         }
-        
+
         for i in 0..16 {
             if self.keys[i] && !self.prev_keys[i] {
                 self.waiting_for_key_release = Some(i as u8);
@@ -373,7 +375,7 @@ impl Cpu {
                 return;
             }
         }
-        
+
         self.pc -= 2;
     }
     fn op_fx15(&mut self, opcode: u16) {
@@ -449,7 +451,6 @@ impl Cpu {
 mod tests {
     use super::*;
 
-
     #[test]
     fn test_op_00e0_clear_screen() {
         let mut cpu = Cpu::new();
@@ -472,7 +473,7 @@ mod tests {
         let initial_pc = cpu.get_pc();
         cpu.execute_opcode(0x2345);
         assert_eq!(cpu.get_pc(), 0x345);
-        assert_eq!(cpu.stack[cpu.sp as usize], initial_pc + 2);
+        assert_eq!(cpu.stack[cpu.sp as usize - 1], initial_pc + 2);
     }
 
     #[test]
@@ -779,7 +780,6 @@ mod tests {
         assert_eq!(cpu.st, 0x20);
     }
 
-
     #[test]
     fn test_screen_initial_state() {
         let cpu = Cpu::new();
@@ -799,12 +799,75 @@ mod tests {
     fn test_op_fx29_font_sprite() {
         let mut cpu = Cpu::new();
         cpu.set_v(0, 0x5); // Sprite for '5'
-        // FX29 - LD F, Vx
+                           // FX29 - LD F, Vx
         cpu.execute_opcode(0xF029);
         // Font sprite 5 = 5 * 5 = 25
         assert_eq!(cpu.get_i(), 25);
     }
 
+    #[test]
+    fn new_cpu_contains_font_glyphs() {
+        let cpu = Cpu::new();
+
+        assert_eq!(&cpu.memory[..FONTSET.len()], &FONTSET);
+    }
+
+    #[test]
+    fn reset_restores_font_glyphs() {
+        let mut cpu = Cpu::new();
+        cpu.memory[0] = 0;
+
+        cpu.reset();
+
+        assert_eq!(&cpu.memory[..FONTSET.len()], &FONTSET);
+    }
+
+    #[test]
+    fn stack_supports_sixteen_nested_calls() {
+        let mut cpu = Cpu::new();
+
+        for address in 0x300..0x310 {
+            cpu.op_2nnn(0x2000 | address);
+        }
+        for _ in 0..16 {
+            cpu.op_00ee();
+        }
+
+        assert_eq!(cpu.sp, 0);
+        assert_eq!(cpu.pc, 0x200);
+    }
+
+    #[test]
+    fn key_skip_ignores_values_outside_keypad() {
+        let mut cpu = Cpu::new();
+        cpu.set_v(0, 0xFF);
+        let pc_before = cpu.get_pc();
+
+        cpu.execute_opcode(0xE09E);
+
+        assert_eq!(cpu.get_pc(), pc_before + 2);
+    }
+
+    #[test]
+    fn keypress_ignores_values_outside_keypad() {
+        let mut cpu = Cpu::new();
+
+        cpu.keypress(16, true);
+
+        assert!(cpu.keys.iter().all(|pressed| !pressed));
+    }
+
+    #[test]
+    fn oversized_rom_is_rejected_without_mutating_memory() {
+        let mut cpu = Cpu::new();
+        let memory_before = cpu.memory;
+        let rom = vec![0; cpu.memory.len() - cpu.pc as usize + 1];
+
+        let result = cpu.load_rom(&rom);
+
+        assert!(result.is_err());
+        assert_eq!(cpu.memory, memory_before);
+    }
 
     #[test]
     fn test_keypress() {

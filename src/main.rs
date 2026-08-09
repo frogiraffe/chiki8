@@ -12,14 +12,6 @@
 //   --config         Config file path
 //   --create-config  Create example config file
 //
-// TODO: Add tests
-//   - [x] cpu opcode tests
-//   - [x] timer tests
-//   - [x] display tests
-
-#![allow(dead_code)]
-#![allow(unused_imports)]
-#![allow(unused_variables)]
 use sdl2::event::Event;
 use sdl2::keyboard::Keycode;
 use sdl2::pixels::Color;
@@ -33,13 +25,12 @@ use audio::*;
 use config::Config;
 use cpu::*;
 use getopts::Options;
-use std::collections::HashMap;
 use std::env;
 use std::path::Path;
 use std::thread;
 use std::time::Duration;
 
-fn print_keymap(keymap: &HashMap<String, u8>) {
+fn print_keymap() {
     println!("\n╔════════════════════════════════════════════════════════════╗");
     println!("║                    CHIKI8 - CHIP-8 Emulator                ║");
     println!("╠════════════════════════════════════════════════════════════╣");
@@ -83,12 +74,7 @@ fn draw_screen(
         if *pixel {
             let x = (i % SCREEN_WIDTH) as i32;
             let y = (i / SCREEN_WIDTH) as i32;
-            match canvas.fill_rect(Rect::new(
-                x * scale as i32,
-                y * scale as i32,
-                scale,
-                scale,
-            )) {
+            match canvas.fill_rect(Rect::new(x * scale as i32, y * scale as i32, scale, scale)) {
                 Ok(_) => {}
                 Err(e) => println!("Error: {}", e),
             }
@@ -140,7 +126,9 @@ fn keycode_to_string(key: Keycode) -> Option<String> {
 }
 
 fn parse_color(s: &str) -> [u8; 3] {
-    let mut iter = s.split(',').map(|num_str| num_str.trim().parse().unwrap_or(0));
+    let mut iter = s
+        .split(',')
+        .map(|num_str| num_str.trim().parse().unwrap_or(0));
     [
         iter.next().unwrap_or(0),
         iter.next().unwrap_or(0),
@@ -149,7 +137,6 @@ fn parse_color(s: &str) -> [u8; 3] {
 }
 
 fn main() {
-    env::set_var("SDL_VIDEODRIVER", "x11");
     let args: Vec<String> = env::args().collect();
     let mut opts = Options::new();
     opts.optopt("f", "file", "ROM file", "FILE");
@@ -191,20 +178,22 @@ fn main() {
         }
     }
 
-    let config_path = matches.opt_str("config").unwrap_or_else(|| "chiki8.toml".to_string());
+    let config_path = matches
+        .opt_str("config")
+        .unwrap_or_else(|| "chiki8.toml".to_string());
     let config = Config::load(Path::new(&config_path)).unwrap_or_else(|e| {
         eprintln!("Could not load config, using defaults: {}", e);
         Config::default()
     });
 
     if matches.opt_present("help") {
-        print_keymap(&config.keymap.keys);
+        print_keymap();
         println!("Usage: {} -f <rom_file> [options]", args[0]);
         println!("{}", opts.usage(""));
         return;
     }
 
-    print_keymap(&config.keymap.keys);
+    print_keymap();
 
     let file_path: String = matches
         .opt_str("f")
@@ -254,7 +243,10 @@ fn main() {
     println!();
 
     let mut cpu = Cpu::new();
-    cpu.load(&file_path);
+    if let Err(error) = cpu.load(Path::new(&file_path)) {
+        eprintln!("{error}");
+        return;
+    }
 
     let sdl_context = sdl2::init().unwrap();
     let mut sound = Sound::new(&sdl_context, volume_f32);
@@ -276,11 +268,9 @@ fn main() {
 
     use std::time::Instant;
     let frame_duration = Duration::from_micros(16667);
-    let _last_frame = Instant::now();
-
     'emuloop: loop {
         let frame_start = Instant::now();
-        
+
         while let Some(event) = event_pump.poll_event() {
             match event {
                 Event::Quit { .. } => {
@@ -312,21 +302,27 @@ fn main() {
                 _ => {}
             }
         }
-        
+
         for _ in 0..speed {
             cpu.tick();
         }
-        
-        draw_screen(&mut canvas, &cpu, &background_color, &foreground_color, scale);
-        
+
+        draw_screen(
+            &mut canvas,
+            &cpu,
+            &background_color,
+            &foreground_color,
+            scale,
+        );
+
         cpu.timers();
-        
+
         if cpu.st > 0 {
             play_sound(&mut sound);
         } else {
             sound.device.pause()
         }
-        
+
         let elapsed = frame_start.elapsed();
         if elapsed < frame_duration {
             thread::sleep(frame_duration - elapsed);

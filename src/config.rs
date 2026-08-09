@@ -35,9 +35,15 @@ impl Default for DisplayConfig {
     }
 }
 
-fn default_scale() -> u32 { 15 }
-fn default_background() -> [u8; 3] { [0, 0, 0] }
-fn default_foreground() -> [u8; 3] { [255, 255, 255] }
+fn default_scale() -> u32 {
+    15
+}
+fn default_background() -> [u8; 3] {
+    [0, 0, 0]
+}
+fn default_foreground() -> [u8; 3] {
+    [255, 255, 255]
+}
 
 #[derive(Debug, Deserialize)]
 pub struct AudioConfig {
@@ -53,7 +59,9 @@ impl Default for AudioConfig {
     }
 }
 
-fn default_volume() -> u32 { 25 }
+fn default_volume() -> u32 {
+    25
+}
 
 #[derive(Debug, Deserialize)]
 pub struct EmulationConfig {
@@ -69,7 +77,9 @@ impl Default for EmulationConfig {
     }
 }
 
-fn default_speed() -> u32 { 10 }
+fn default_speed() -> u32 {
+    10
+}
 
 #[derive(Debug, Deserialize)]
 pub struct KeymapConfig {
@@ -111,14 +121,13 @@ impl Config {
         if !path.exists() {
             return Ok(Self::default());
         }
-        
-        let content = fs::read_to_string(path)
-            .map_err(|e| format!("Could not read config file: {}", e))?;
-        
-        toml::from_str(&content)
-            .map_err(|e| format!("Config parse error: {}", e))
+
+        let content =
+            fs::read_to_string(path).map_err(|e| format!("Could not read config file: {}", e))?;
+
+        toml::from_str(&content).map_err(|e| format!("Config parse error: {}", e))
     }
-    
+
     pub fn get_keycode(&self, key_name: &str) -> Option<usize> {
         self.keymap.keys.get(key_name).map(|&v| v as usize)
     }

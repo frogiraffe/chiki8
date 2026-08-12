@@ -242,7 +242,7 @@ fn main() {
     }
     println!();
 
-    let mut cpu = Cpu::new();
+    let mut cpu = Cpu::new(Profile::Classic);
     if let Err(error) = cpu.load(Path::new(&file_path)) {
         eprintln!("{error}");
         return;

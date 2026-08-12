@@ -1,5 +1,6 @@
 use rand::Rng;
 use std::path::Path;
+use std::str::FromStr;
 pub const SCREEN_WIDTH: usize = 64;
 pub const SCREEN_HEIGHT: usize = 32;
 const PROGRAM_START: u16 = 0x200;
@@ -21,7 +22,25 @@ const FONTSET: [u8; 80] = [
     0xF0, 0x80, 0xF0, 0x80, 0xF0, // E
     0xF0, 0x80, 0xF0, 0x80, 0x80, // F
 ];
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum Profile {
+    Classic,
+}
+
+impl FromStr for Profile {
+    type Err = String;
+
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        match value {
+            "classic" => Ok(Self::Classic),
+            _ => Err(format!("unknown profile '{value}'; expected 'classic'")),
+        }
+    }
+}
+
 pub struct Cpu {
+    profile: Profile,
     pc: u16,
     sp: u8,
     stack: [u16; 16],
@@ -39,12 +58,6 @@ pub struct Cpu {
     memory: [u8; 4096],
 }
 
-impl Default for Cpu {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
 impl Cpu {
     pub fn get_display(&self) -> &[bool; SCREEN_WIDTH * SCREEN_HEIGHT] {
         &self.screen
@@ -57,8 +70,9 @@ impl Cpu {
             *current = pressed;
         }
     }
-    pub fn new() -> Cpu {
+    pub fn new(profile: Profile) -> Cpu {
         let mut cpu = Cpu {
+            profile,
             pc: PROGRAM_START,
             stack: [0; 16],
             sp: 0,
@@ -243,17 +257,23 @@ impl Cpu {
     fn op_8xy1(&mut self, opcode: u16) {
         let x = ((opcode & 0x0F00) >> 8) as usize;
         let y = ((opcode & 0x00F0) >> 4) as usize;
-        self.v[x] |= self.v[y];
+        match self.profile {
+            Profile::Classic => self.v[x] |= self.v[y],
+        }
     }
     fn op_8xy2(&mut self, opcode: u16) {
         let x = ((opcode & 0x0F00) >> 8) as usize;
         let y = ((opcode & 0x00F0) >> 4) as usize;
-        self.v[x] &= self.v[y];
+        match self.profile {
+            Profile::Classic => self.v[x] &= self.v[y],
+        }
     }
     fn op_8xy3(&mut self, opcode: u16) {
         let x = ((opcode & 0x0F00) >> 8) as usize;
         let y = ((opcode & 0x00F0) >> 4) as usize;
-        self.v[x] ^= self.v[y];
+        match self.profile {
+            Profile::Classic => self.v[x] ^= self.v[y],
+        }
     }
     fn op_8xy4(&mut self, opcode: u16) {
         let x = ((opcode & 0x0F00) >> 8) as usize;
@@ -273,8 +293,12 @@ impl Cpu {
     }
     fn op_8xy6(&mut self, opcode: u16) {
         let x = ((opcode & 0x0F00) >> 8) as usize;
-        self.v[0xF] = self.v[x] & 0x1;
-        self.v[x] >>= 1;
+        match self.profile {
+            Profile::Classic => {
+                self.v[0xF] = self.v[x] & 0x1;
+                self.v[x] >>= 1;
+            }
+        }
     }
     fn op_8xy7(&mut self, opcode: u16) {
         let x = ((opcode & 0x0F00) >> 8) as usize;
@@ -288,12 +312,16 @@ impl Cpu {
     }
     fn op_8xye(&mut self, opcode: u16) {
         let x = ((opcode & 0x0F00) >> 8) as usize;
-        if self.v[x] & 0x80 != 0 {
-            self.v[0xF] = 1;
-        } else {
-            self.v[0xF] = 0;
+        match self.profile {
+            Profile::Classic => {
+                if self.v[x] & 0x80 != 0 {
+                    self.v[0xF] = 1;
+                } else {
+                    self.v[0xF] = 0;
+                }
+                self.v[x] <<= 1;
+            }
         }
-        self.v[x] <<= 1;
     }
     fn op_9xy0(&mut self, opcode: u16) {
         let x = ((opcode & 0x0F00) >> 8) as usize;
@@ -306,7 +334,9 @@ impl Cpu {
         self.i = (opcode & 0x0FFF) as usize;
     }
     fn op_bnnn(&mut self, opcode: u16) {
-        self.pc = (opcode & 0x0FFF) + self.v[0] as u16;
+        match self.profile {
+            Profile::Classic => self.pc = (opcode & 0x0FFF) + self.v[0] as u16,
+        }
     }
     fn op_cxkk(&mut self, opcode: u16) {
         let mut rng = rand::thread_rng();
@@ -324,8 +354,12 @@ impl Cpu {
             let pixel = self.memory[sprite];
             for x_offset in 0..8 {
                 if (pixel & (0x80 >> x_offset)) != 0 {
-                    let x = (self.v[x] as usize + x_offset) % SCREEN_WIDTH;
-                    let y = (self.v[y] as usize + y_offset as usize) % SCREEN_HEIGHT;
+                    let (x, y) = match self.profile {
+                        Profile::Classic => (
+                            (self.v[x] as usize + x_offset) % SCREEN_WIDTH,
+                            (self.v[y] as usize + y_offset as usize) % SCREEN_HEIGHT,
+                        ),
+                    };
                     if self.screen[x + y * SCREEN_WIDTH] {
                         flipped = true;
                     }
@@ -405,14 +439,22 @@ impl Cpu {
     }
     fn op_fx55(&mut self, opcode: u16) {
         let x = ((opcode & 0x0F00) >> 8) as usize;
-        for i in 0..=x {
-            self.memory[self.i + i] = self.v[i];
+        match self.profile {
+            Profile::Classic => {
+                for i in 0..=x {
+                    self.memory[self.i + i] = self.v[i];
+                }
+            }
         }
     }
     fn op_fx65(&mut self, opcode: u16) {
         let x = ((opcode & 0x0F00) >> 8) as usize;
-        for i in 0..=x {
-            self.v[i] = self.memory[self.i + i];
+        match self.profile {
+            Profile::Classic => {
+                for i in 0..=x {
+                    self.v[i] = self.memory[self.i + i];
+                }
+            }
         }
     }
 
@@ -548,7 +590,7 @@ mod tests {
 
     #[test]
     fn test_op_00e0_clear_screen() {
-        let mut cpu = Cpu::new();
+        let mut cpu = Cpu::new(Profile::Classic);
         cpu.screen = [true; SCREEN_WIDTH * SCREEN_HEIGHT];
         cpu.execute_opcode(0x00E0);
         assert!(cpu.screen.iter().all(|&p| !p));
@@ -556,7 +598,7 @@ mod tests {
 
     #[test]
     fn test_op_1nnn_jump() {
-        let mut cpu = Cpu::new();
+        let mut cpu = Cpu::new(Profile::Classic);
         // 1NNN - JP addr
         cpu.execute_opcode(0x1ABC);
         assert_eq!(cpu.get_pc(), 0xABC);
@@ -564,7 +606,7 @@ mod tests {
 
     #[test]
     fn test_op_2nnn_call_subroutine() {
-        let mut cpu = Cpu::new();
+        let mut cpu = Cpu::new(Profile::Classic);
         let initial_pc = cpu.get_pc();
         cpu.execute_opcode(0x2345);
         assert_eq!(cpu.get_pc(), 0x345);
@@ -573,7 +615,7 @@ mod tests {
 
     #[test]
     fn test_op_00ee_return() {
-        let mut cpu = Cpu::new();
+        let mut cpu = Cpu::new(Profile::Classic);
         cpu.execute_opcode(0x2400);
         cpu.execute_opcode(0x00EE);
         assert_eq!(cpu.get_pc(), 0x202);
@@ -581,7 +623,7 @@ mod tests {
 
     #[test]
     fn test_op_3xkk_skip_if_equal() {
-        let mut cpu = Cpu::new();
+        let mut cpu = Cpu::new(Profile::Classic);
         cpu.set_v(0, 0x42);
         let pc_before = cpu.get_pc();
         cpu.execute_opcode(0x3042);
@@ -590,7 +632,7 @@ mod tests {
 
     #[test]
     fn test_op_3xkk_no_skip_if_not_equal() {
-        let mut cpu = Cpu::new();
+        let mut cpu = Cpu::new(Profile::Classic);
         cpu.set_v(0, 0x42);
         let pc_before = cpu.get_pc();
         cpu.execute_opcode(0x3043);
@@ -599,7 +641,7 @@ mod tests {
 
     #[test]
     fn test_op_4xkk_skip_if_not_equal() {
-        let mut cpu = Cpu::new();
+        let mut cpu = Cpu::new(Profile::Classic);
         cpu.set_v(0, 0x42);
         let pc_before = cpu.get_pc();
         // 4XKK - SNE Vx, byte
@@ -609,7 +651,7 @@ mod tests {
 
     #[test]
     fn test_op_5xy0_skip_if_vx_eq_vy() {
-        let mut cpu = Cpu::new();
+        let mut cpu = Cpu::new(Profile::Classic);
         cpu.set_v(0, 0x42);
         cpu.set_v(1, 0x42);
         let pc_before = cpu.get_pc();
@@ -620,7 +662,7 @@ mod tests {
 
     #[test]
     fn test_op_6xkk_load_byte() {
-        let mut cpu = Cpu::new();
+        let mut cpu = Cpu::new(Profile::Classic);
         // 6XKK - LD Vx, byte
         cpu.execute_opcode(0x6A42);
         assert_eq!(cpu.get_v(0xA), 0x42);
@@ -628,7 +670,7 @@ mod tests {
 
     #[test]
     fn test_op_7xkk_add_byte() {
-        let mut cpu = Cpu::new();
+        let mut cpu = Cpu::new(Profile::Classic);
         cpu.set_v(0, 0x10);
         // 7XKK - ADD Vx, byte
         cpu.execute_opcode(0x7005);
@@ -637,7 +679,7 @@ mod tests {
 
     #[test]
     fn test_op_7xkk_add_overflow() {
-        let mut cpu = Cpu::new();
+        let mut cpu = Cpu::new(Profile::Classic);
         cpu.set_v(0, 0xFF);
         cpu.execute_opcode(0x7002);
         assert_eq!(cpu.get_v(0), 0x01); // Wrap around
@@ -645,7 +687,7 @@ mod tests {
 
     #[test]
     fn test_op_8xy0_load_vy_to_vx() {
-        let mut cpu = Cpu::new();
+        let mut cpu = Cpu::new(Profile::Classic);
         cpu.set_v(1, 0x42);
         // 8XY0 - LD Vx, Vy
         cpu.execute_opcode(0x8010);
@@ -654,7 +696,7 @@ mod tests {
 
     #[test]
     fn test_op_8xy1_or() {
-        let mut cpu = Cpu::new();
+        let mut cpu = Cpu::new(Profile::Classic);
         cpu.set_v(0, 0x0F);
         cpu.set_v(1, 0xF0);
         // 8XY1 - OR Vx, Vy
@@ -664,7 +706,7 @@ mod tests {
 
     #[test]
     fn test_op_8xy2_and() {
-        let mut cpu = Cpu::new();
+        let mut cpu = Cpu::new(Profile::Classic);
         cpu.set_v(0, 0x0F);
         cpu.set_v(1, 0xFF);
         // 8XY2 - AND Vx, Vy
@@ -674,7 +716,7 @@ mod tests {
 
     #[test]
     fn test_op_8xy3_xor() {
-        let mut cpu = Cpu::new();
+        let mut cpu = Cpu::new(Profile::Classic);
         cpu.set_v(0, 0xFF);
         cpu.set_v(1, 0x0F);
         // 8XY3 - XOR Vx, Vy
@@ -684,7 +726,7 @@ mod tests {
 
     #[test]
     fn test_op_8xy4_add_no_carry() {
-        let mut cpu = Cpu::new();
+        let mut cpu = Cpu::new(Profile::Classic);
         cpu.set_v(0, 0x10);
         cpu.set_v(1, 0x20);
         // 8XY4 - ADD Vx, Vy
@@ -695,7 +737,7 @@ mod tests {
 
     #[test]
     fn test_op_8xy4_add_with_carry() {
-        let mut cpu = Cpu::new();
+        let mut cpu = Cpu::new(Profile::Classic);
         cpu.set_v(0, 0xFF);
         cpu.set_v(1, 0x02);
         cpu.execute_opcode(0x8014);
@@ -705,7 +747,7 @@ mod tests {
 
     #[test]
     fn test_op_8xy5_sub_no_borrow() {
-        let mut cpu = Cpu::new();
+        let mut cpu = Cpu::new(Profile::Classic);
         cpu.set_v(0, 0x20);
         cpu.set_v(1, 0x10);
         // 8XY5 - SUB Vx, Vy
@@ -716,7 +758,7 @@ mod tests {
 
     #[test]
     fn test_op_8xy5_sub_with_borrow() {
-        let mut cpu = Cpu::new();
+        let mut cpu = Cpu::new(Profile::Classic);
         cpu.set_v(0, 0x10);
         cpu.set_v(1, 0x20);
         cpu.execute_opcode(0x8015);
@@ -726,7 +768,7 @@ mod tests {
 
     #[test]
     fn test_op_8xy6_shift_right() {
-        let mut cpu = Cpu::new();
+        let mut cpu = Cpu::new(Profile::Classic);
         cpu.set_v(0, 0b00000011);
         // 8XY6 - SHR Vx
         cpu.execute_opcode(0x8006);
@@ -736,7 +778,7 @@ mod tests {
 
     #[test]
     fn test_op_8xye_shift_left() {
-        let mut cpu = Cpu::new();
+        let mut cpu = Cpu::new(Profile::Classic);
         cpu.set_v(0, 0b10000001);
         // 8XYE - SHL Vx
         cpu.execute_opcode(0x800E);
@@ -746,7 +788,7 @@ mod tests {
 
     #[test]
     fn test_op_9xy0_skip_if_vx_ne_vy() {
-        let mut cpu = Cpu::new();
+        let mut cpu = Cpu::new(Profile::Classic);
         cpu.set_v(0, 0x42);
         cpu.set_v(1, 0x43);
         let pc_before = cpu.get_pc();
@@ -757,7 +799,7 @@ mod tests {
 
     #[test]
     fn test_op_annn_load_i() {
-        let mut cpu = Cpu::new();
+        let mut cpu = Cpu::new(Profile::Classic);
         // ANNN - LD I, addr
         cpu.execute_opcode(0xA123);
         assert_eq!(cpu.get_i(), 0x123);
@@ -765,7 +807,7 @@ mod tests {
 
     #[test]
     fn test_op_bnnn_jump_v0() {
-        let mut cpu = Cpu::new();
+        let mut cpu = Cpu::new(Profile::Classic);
         cpu.set_v(0, 0x10);
         // BNNN - JP V0, addr
         cpu.execute_opcode(0xB100);
@@ -774,7 +816,7 @@ mod tests {
 
     #[test]
     fn test_op_fx1e_add_i() {
-        let mut cpu = Cpu::new();
+        let mut cpu = Cpu::new(Profile::Classic);
         cpu.i = 0x100;
         cpu.set_v(0, 0x10);
         // FX1E - ADD I, Vx
@@ -784,7 +826,7 @@ mod tests {
 
     #[test]
     fn test_op_fx33_bcd() {
-        let mut cpu = Cpu::new();
+        let mut cpu = Cpu::new(Profile::Classic);
         cpu.i = 0x300;
         cpu.set_v(0, 234);
         // FX33 - LD B, Vx
@@ -796,7 +838,7 @@ mod tests {
 
     #[test]
     fn test_op_fx55_store_registers() {
-        let mut cpu = Cpu::new();
+        let mut cpu = Cpu::new(Profile::Classic);
         cpu.i = 0x300;
         cpu.set_v(0, 1);
         cpu.set_v(1, 2);
@@ -810,7 +852,7 @@ mod tests {
 
     #[test]
     fn test_op_fx65_load_registers() {
-        let mut cpu = Cpu::new();
+        let mut cpu = Cpu::new(Profile::Classic);
         cpu.i = 0x300;
         cpu.memory[0x300] = 10;
         cpu.memory[0x301] = 20;
@@ -824,7 +866,7 @@ mod tests {
 
     #[test]
     fn test_timer_delay_decrement() {
-        let mut cpu = Cpu::new();
+        let mut cpu = Cpu::new(Profile::Classic);
         cpu.dt = 10;
         cpu.timers();
         assert_eq!(cpu.dt, 9);
@@ -832,7 +874,7 @@ mod tests {
 
     #[test]
     fn test_timer_sound_decrement() {
-        let mut cpu = Cpu::new();
+        let mut cpu = Cpu::new(Profile::Classic);
         cpu.st = 5;
         cpu.timers();
         assert_eq!(cpu.st, 4);
@@ -840,7 +882,7 @@ mod tests {
 
     #[test]
     fn test_timer_no_underflow() {
-        let mut cpu = Cpu::new();
+        let mut cpu = Cpu::new(Profile::Classic);
         cpu.dt = 0;
         cpu.st = 0;
         cpu.timers();
@@ -850,7 +892,7 @@ mod tests {
 
     #[test]
     fn test_op_fx07_get_delay() {
-        let mut cpu = Cpu::new();
+        let mut cpu = Cpu::new(Profile::Classic);
         cpu.dt = 0x42;
         // FX07 - LD Vx, DT
         cpu.execute_opcode(0xF007);
@@ -859,7 +901,7 @@ mod tests {
 
     #[test]
     fn test_op_fx15_set_delay() {
-        let mut cpu = Cpu::new();
+        let mut cpu = Cpu::new(Profile::Classic);
         cpu.set_v(0, 0x30);
         // FX15 - LD DT, Vx
         cpu.execute_opcode(0xF015);
@@ -868,7 +910,7 @@ mod tests {
 
     #[test]
     fn test_op_fx18_set_sound() {
-        let mut cpu = Cpu::new();
+        let mut cpu = Cpu::new(Profile::Classic);
         cpu.set_v(0, 0x20);
         // FX18 - LD ST, Vx
         cpu.execute_opcode(0xF018);
@@ -877,13 +919,13 @@ mod tests {
 
     #[test]
     fn test_screen_initial_state() {
-        let cpu = Cpu::new();
+        let cpu = Cpu::new(Profile::Classic);
         assert!(cpu.screen.iter().all(|&p| !p));
     }
 
     #[test]
     fn test_reset_clears_screen() {
-        let mut cpu = Cpu::new();
+        let mut cpu = Cpu::new(Profile::Classic);
         cpu.screen[0] = true;
         cpu.screen[100] = true;
         cpu.reset();
@@ -892,7 +934,7 @@ mod tests {
 
     #[test]
     fn test_op_fx29_font_sprite() {
-        let mut cpu = Cpu::new();
+        let mut cpu = Cpu::new(Profile::Classic);
         cpu.set_v(0, 0x5); // Sprite for '5'
                            // FX29 - LD F, Vx
         cpu.execute_opcode(0xF029);
@@ -902,14 +944,14 @@ mod tests {
 
     #[test]
     fn new_cpu_contains_font_glyphs() {
-        let cpu = Cpu::new();
+        let cpu = Cpu::new(Profile::Classic);
 
         assert_eq!(&cpu.memory[..FONTSET.len()], &FONTSET);
     }
 
     #[test]
     fn reset_restores_font_glyphs() {
-        let mut cpu = Cpu::new();
+        let mut cpu = Cpu::new(Profile::Classic);
         cpu.memory[0] = 0;
 
         cpu.reset();
@@ -919,7 +961,7 @@ mod tests {
 
     #[test]
     fn stack_supports_sixteen_nested_calls() {
-        let mut cpu = Cpu::new();
+        let mut cpu = Cpu::new(Profile::Classic);
 
         for address in 0x300..0x310 {
             cpu.op_2nnn(0x2000 | address);
@@ -934,7 +976,7 @@ mod tests {
 
     #[test]
     fn key_skip_ignores_values_outside_keypad() {
-        let mut cpu = Cpu::new();
+        let mut cpu = Cpu::new(Profile::Classic);
         cpu.set_v(0, 0xFF);
         let pc_before = cpu.get_pc();
 
@@ -945,7 +987,7 @@ mod tests {
 
     #[test]
     fn keypress_ignores_values_outside_keypad() {
-        let mut cpu = Cpu::new();
+        let mut cpu = Cpu::new(Profile::Classic);
 
         cpu.keypress(16, true);
 
@@ -954,7 +996,7 @@ mod tests {
 
     #[test]
     fn oversized_rom_is_rejected_without_mutating_memory() {
-        let mut cpu = Cpu::new();
+        let mut cpu = Cpu::new(Profile::Classic);
         let memory_before = cpu.memory;
         let rom = vec![0; cpu.memory.len() - cpu.pc as usize + 1];
 
@@ -966,7 +1008,7 @@ mod tests {
 
     #[test]
     fn sys_instruction_does_not_clear_screen() {
-        let mut cpu = Cpu::new();
+        let mut cpu = Cpu::new(Profile::Classic);
         cpu.screen[0] = true;
 
         cpu.execute_opcode(0x0120);
@@ -976,7 +1018,7 @@ mod tests {
 
     #[test]
     fn invalid_5xy_variant_does_not_skip() {
-        let mut cpu = Cpu::new();
+        let mut cpu = Cpu::new(Profile::Classic);
         cpu.set_v(0, 0x42);
         cpu.set_v(1, 0x42);
         let pc_before = cpu.get_pc();
@@ -988,7 +1030,7 @@ mod tests {
 
     #[test]
     fn invalid_9xy_variant_does_not_skip() {
-        let mut cpu = Cpu::new();
+        let mut cpu = Cpu::new(Profile::Classic);
         cpu.set_v(0, 0x42);
         cpu.set_v(1, 0x43);
         let pc_before = cpu.get_pc();
@@ -1000,7 +1042,7 @@ mod tests {
 
     #[test]
     fn test_keypress() {
-        let mut cpu = Cpu::new();
+        let mut cpu = Cpu::new(Profile::Classic);
         cpu.keypress(0x5, true);
         assert!(cpu.keys[0x5]);
         cpu.keypress(0x5, false);
@@ -1009,7 +1051,7 @@ mod tests {
 
     #[test]
     fn test_op_ex9e_skip_if_key_pressed() {
-        let mut cpu = Cpu::new();
+        let mut cpu = Cpu::new(Profile::Classic);
         cpu.set_v(0, 0x5);
         cpu.keypress(0x5, true);
         let pc_before = cpu.get_pc();
@@ -1020,7 +1062,7 @@ mod tests {
 
     #[test]
     fn test_op_exa1_skip_if_key_not_pressed() {
-        let mut cpu = Cpu::new();
+        let mut cpu = Cpu::new(Profile::Classic);
         cpu.set_v(0, 0x5);
         cpu.keypress(0x5, false);
         let pc_before = cpu.get_pc();

@@ -15,7 +15,7 @@ chiki8 keeps the emulator core deliberately small: a 4 KiB virtual machine, 34 i
 - Configurable scale, colors, emulation speed, volume, and key mapping
 - Safe ROM-size validation against the 3,584-byte program region
 - TOML configuration with CLI overrides
-- 49 unit tests plus rustfmt and strict Clippy checks in CI
+- Unit tests plus rustfmt and strict Clippy checks in CI
 
 ## Prerequisites
 

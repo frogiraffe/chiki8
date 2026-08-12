@@ -156,12 +156,29 @@ fn main() {
         "COLOR",
     );
     opts.optopt("", "config", "Config file path", "PATH");
+    opts.optopt(
+        "",
+        "profile",
+        "Execution profile (default: classic)",
+        "PROFILE",
+    );
     opts.optflag("", "create-config", "Create example config file");
     opts.optflag("", "help", "Show help message");
 
     let matches = match opts.parse(&args[1..]) {
         Ok(m) => m,
         Err(f) => panic!("{}", f),
+    };
+
+    let profile = match matches.opt_str("profile") {
+        Some(value) => match value.parse() {
+            Ok(profile) => profile,
+            Err(error) => {
+                eprintln!("{error}");
+                return;
+            }
+        },
+        None => Profile::Classic,
     };
 
     if matches.opt_present("create-config") {
@@ -242,7 +259,7 @@ fn main() {
     }
     println!();
 
-    let mut cpu = Cpu::new(Profile::Classic);
+    let mut cpu = Cpu::new(profile);
     if let Err(error) = cpu.load(Path::new(&file_path)) {
         eprintln!("{error}");
         return;

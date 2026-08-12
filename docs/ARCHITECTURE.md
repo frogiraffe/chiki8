@@ -51,15 +51,18 @@ Opcode dispatch uses masks in `Cpu::decode_opcode`; each of the 34 handlers owns
 
 ## Module boundaries
 
-- `src/cpu.rs` — VM state, opcode decoding, timers, ROM bounds, and unit tests
+- `src/cpu.rs` owns VM state and the selected `Profile`, including quirk-sensitive opcode transitions, timers, ROM bounds, and unit tests.
 - `src/config.rs` — TOML schema, defaults, key mapping, and example generation
 - `src/audio.rs` — SDL2 square-wave callback and playback device
-- `src/main.rs` — CLI, composition, native I/O, frame pacing, and rendering
+- `src/main.rs` selects the CLI profile and passes it into CPU construction; it also owns composition, native I/O, frame pacing, and rendering.
 
 ## Compatibility decisions
 
 - Program memory begins at `0x200`; font sprites occupy the beginning of memory.
-- `8XY6` and `8XYE` shift `VX` directly.
-- `DXYN` wraps pixels at both screen edges and reports collisions through `VF`.
-- `FX55` and `FX65` do not increment `I`.
-- SUPER-CHIP, XO-CHIP, and runtime-selectable quirk profiles are outside the current scope.
+- The `classic` profile shifts `VX` and ignores `Y`.
+- `FX55` and `FX65` preserve `I`.
+- `BNNN` uses `V0`.
+- OR, AND, and XOR preserve `VF`.
+- `DXYN` wraps at both display edges and reports collisions through `VF`.
+- These choices are deterministically unit-tested; external compatibility ROM evidence is not claimed here.
+- SUPER-CHIP remains unsupported and outside the current implementation.

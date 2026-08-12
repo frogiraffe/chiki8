@@ -569,7 +569,8 @@ mod tests {
             assert!(cpu.screen[63]);
         }
 
-        let checks: [(&str, fn(&mut Cpu)); 5] = [
+        type ContractCheck = (&'static str, fn(&mut Cpu));
+        let checks: [ContractCheck; 5] = [
             ("modern VX shifts", modern_vx_shifts),
             (
                 "unchanged I after FX55/FX65",

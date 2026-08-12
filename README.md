@@ -57,6 +57,7 @@ cargo run --release -- -f <rom_file> [options]
 -v, --volume VOLUME    Volume from 0 to 100 (default: 25)
 -b, --background COLOR Background color as R,G,B
 -c, --color COLOR      Foreground color as R,G,B
+    --profile PROFILE   Emulation profile (default: classic)
     --config PATH       TOML configuration path
     --create-config     Write an example chiki8.toml
     --help              Show help
@@ -70,6 +71,9 @@ cargo run --release -- -f path/to/game.ch8 -s 20 -c 0,255,0
 
 # Use a custom configuration file
 cargo run --release -- -f path/to/game.ch8 --config configs/fast.toml
+
+# Select the Classic profile explicitly
+cargo run --release -- -f path/to/game.ch8 --profile classic
 
 # Generate a documented starter configuration
 cargo run -- --create-config
@@ -103,9 +107,15 @@ The CPU core is independent of SDL and directly unit-tested. The runtime loop co
 
 ## Compatibility scope
 
-chiki8 targets the classic 64×32 CHIP-8 model. Shift instructions operate on `VX`, sprites wrap at display edges, and `FX55`/`FX65` leave `I` unchanged. SUPER-CHIP, XO-CHIP, and configurable quirk profiles are not implemented.
+The `classic` profile names chiki8's established modern Classic contract; it is not a claim of original COSMAC VIP behavior. Its five deterministically unit-tested choices are:
 
-The unit suite verifies individual machine-state transitions. The project does not yet publish results from an external compatibility ROM suite, so compatibility claims are intentionally bounded to the implemented and tested behavior.
+- Shift instructions use `VX` and ignore `Y`.
+- `FX55` and `FX65` preserve `I`.
+- `BNNN` uses `V0`.
+- OR, AND, and XOR preserve `VF`.
+- `DXYN` wraps at both display edges.
+
+The project does not yet publish external compatibility ROM evidence. SUPER-CHIP remains unsupported and is not implemented; its profile and behavior are outside the current compatibility scope.
 
 ## Development
 

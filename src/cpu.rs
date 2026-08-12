@@ -454,6 +454,99 @@ mod tests {
     use super::*;
 
     #[test]
+    fn profile_parser_accepts_only_classic() {
+        assert_eq!("classic".parse::<Profile>(), Ok(Profile::Classic));
+        assert!("Classic".parse::<Profile>().is_err());
+        assert!("not-a-profile".parse::<Profile>().is_err());
+    }
+
+    #[test]
+    fn classic_profile_contract() {
+        fn modern_vx_shifts(cpu: &mut Cpu) {
+            cpu.v[1] = 0b1000_0011;
+            cpu.v[2] = 0b0100_0000;
+            cpu.execute_opcode(0x8126);
+            assert_eq!(cpu.v[1], 0b0100_0001);
+            assert_eq!(cpu.v[2], 0b0100_0000);
+            assert_eq!(cpu.v[0xF], 1);
+
+            cpu.v[1] = 0b1000_0001;
+            cpu.v[2] = 0b0000_0001;
+            cpu.execute_opcode(0x812E);
+            assert_eq!(cpu.v[1], 0b0000_0010);
+            assert_eq!(cpu.v[2], 0b0000_0001);
+            assert_eq!(cpu.v[0xF], 1);
+        }
+
+        fn unchanged_i_after_memory_transfers(cpu: &mut Cpu) {
+            cpu.i = 0x300;
+            cpu.v[..=2].copy_from_slice(&[1, 2, 3]);
+            cpu.execute_opcode(0xF255);
+            assert_eq!(cpu.i, 0x300);
+            assert_eq!(&cpu.memory[0x300..=0x302], &[1, 2, 3]);
+
+            cpu.memory[0x300..=0x302].copy_from_slice(&[4, 5, 6]);
+            cpu.execute_opcode(0xF265);
+            assert_eq!(cpu.i, 0x300);
+            assert_eq!(&cpu.v[..=2], &[4, 5, 6]);
+        }
+
+        fn v0_based_jump(cpu: &mut Cpu) {
+            cpu.v[0] = 0x10;
+            cpu.v[1] = 0x40;
+            cpu.execute_opcode(0xB123);
+            assert_eq!(cpu.pc, 0x133);
+        }
+
+        fn preserved_vf_after_logic(cpu: &mut Cpu) {
+            for (opcode, x, y, expected) in [
+                (0x8121, 0x0F, 0xF0, 0xFF),
+                (0x8122, 0x0F, 0xF3, 0x03),
+                (0x8123, 0xFF, 0x0F, 0xF0),
+            ] {
+                cpu.v[1] = x;
+                cpu.v[2] = y;
+                cpu.v[0xF] = 0xAB;
+                cpu.execute_opcode(opcode);
+                assert_eq!(cpu.v[1], expected);
+                assert_eq!(cpu.v[0xF], 0xAB);
+            }
+        }
+
+        fn two_axis_sprite_wrapping(cpu: &mut Cpu) {
+            cpu.i = 0x300;
+            cpu.memory[0x300] = 0b1100_0001;
+            cpu.memory[0x301] = 0b1000_0000;
+            cpu.v[0] = (SCREEN_WIDTH - 1) as u8;
+            cpu.v[1] = (SCREEN_HEIGHT - 1) as u8;
+            cpu.execute_opcode(0xD012);
+
+            assert!(cpu.screen[63 + 31 * SCREEN_WIDTH]);
+            assert!(cpu.screen[31 * SCREEN_WIDTH]);
+            assert!(cpu.screen[6 + 31 * SCREEN_WIDTH]);
+            assert!(cpu.screen[63]);
+        }
+
+        let checks: [(&str, fn(&mut Cpu)); 5] = [
+            ("modern VX shifts", modern_vx_shifts),
+            (
+                "unchanged I after FX55/FX65",
+                unchanged_i_after_memory_transfers,
+            ),
+            ("V0-based BNNN", v0_based_jump),
+            ("preserved VF after logic", preserved_vf_after_logic),
+            ("two-axis sprite wrapping", two_axis_sprite_wrapping),
+        ];
+
+        for (name, check) in checks {
+            let mut cpu = Cpu::new(Profile::Classic);
+            check(&mut cpu);
+            cpu.reset();
+            assert_eq!(cpu.profile, Profile::Classic, "{name}");
+        }
+    }
+
+    #[test]
     fn test_op_00e0_clear_screen() {
         let mut cpu = Cpu::new();
         cpu.screen = [true; SCREEN_WIDTH * SCREEN_HEIGHT];

@@ -8,7 +8,7 @@ suite_commit=cb24d5595384a80b49ddedae13bec4042b16d41d
 suite_url=https://github.com/Timendus/chip8-test-suite.git
 case_id=chip8-logo
 output=target/conformance-tracer.jsonl
-manifest=tests/fixtures/vendor/timendus-chip8-test-suite.tsv
+manifest=${CHIKI8_MANIFEST:-tests/fixtures/vendor/timendus-chip8-test-suite.tsv}
 mode=run
 
 while (($#)); do
@@ -26,12 +26,16 @@ verify_inputs() {
     [[ $(sed -n '2p' "$manifest") == $'case_id\tsource_url\tcommit\trom_path\tsha256\tlicense\tlicense_file\tauthor_project\tprofile\tselector\tschedule\tcheckpoint\tpurpose\tclassification' ]] || {
         printf 'manifest header mismatch\n' >&2; return 1;
     }
-    awk -F '\t' '
+    local suite_revision
+    suite_revision=$(sed -n '1s/.*suite_commit=\([^[:space:]]*\).*/\1/p' "$manifest")
+    [[ $suite_revision =~ ^[0-9a-f]{40}$ ]] || { printf 'manifest suite commit invalid\n' >&2; return 1; }
+    awk -F '\t' -v suite_revision="$suite_revision" '
         NR <= 2 { next }
         NF != 14 { print "manifest row " NR ": expected 14 fields" > "/dev/stderr"; bad=1; next }
         $1 == "" || seen[$1]++ { print "manifest row " NR ": missing/duplicate case_id" > "/dev/stderr"; bad=1 }
         $2 !~ /^https:\/\/github.com\/Timendus\/chip8-test-suite.git$/ { print "manifest row " NR ": invalid source_url" > "/dev/stderr"; bad=1 }
         $3 !~ /^[0-9a-f]{40}$/ { print "manifest row " NR ": invalid commit" > "/dev/stderr"; bad=1 }
+        $3 != suite_revision { print "manifest row " NR ": revision differs from suite header" > "/dev/stderr"; bad=1 }
         $4 !~ /^bin\/[A-Za-z0-9+_.-]+\.ch8$/ { print "manifest row " NR ": unsafe rom_path" > "/dev/stderr"; bad=1 }
         $5 !~ /^[0-9a-f]{64}$/ { print "manifest row " NR ": invalid sha256" > "/dev/stderr"; bad=1 }
         $6 != "GPL-3.0-only" || $7 == "" || $8 == "" || $11 !~ /^cycles:[1-9][0-9]*$/ || $12 == "" || $13 == "" { print "manifest row " NR ": missing provenance field" > "/dev/stderr"; bad=1 }
@@ -48,13 +52,41 @@ verify_inputs() {
     fi
 }
 
+verify_checkout() {
+    local checkout=$1 expected=$2
+    [[ $(git -C "$checkout" rev-parse HEAD 2>/dev/null) == "$expected" ]] || {
+        printf 'suite revision mismatch\n' >&2; return 1;
+    }
+}
+
+verify_rom() {
+    local rom_path=$1 expected=$2 actual
+    actual=$(sha256sum "$rom_path" | cut -d ' ' -f 1)
+    [[ $actual == "$expected" ]] || {
+        printf 'ROM SHA-256 mismatch: %s\n' "$actual" >&2; return 1;
+    }
+}
+
 self_test() {
-    local fixture=$temp_dir/manifest.tsv
-    cp "$manifest" "$fixture"
-    sed -i '3s/test-only-transient/release-asset/' "$fixture"
-    if CHIKI8_MANIFEST=$fixture "$0" --verify-inputs >"$temp_dir/self-test.log" 2>&1; then
-        printf 'self-test: invalid classification unexpectedly passed\n' >&2
-        return 1
+    local fixture=$temp_dir/manifest.tsv checkout=$temp_dir/checkout
+    local mutations=('3s/test-only-transient/release-asset/' '4s/^ibm-logo/chip8-logo/' '5s/[0-9a-f]\{64\}/bad-hash/' '6s/cb24d5595384a80b49ddedae13bec4042b16d41d/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/')
+    for mutation in "${mutations[@]}"; do
+        cp tests/fixtures/vendor/timendus-chip8-test-suite.tsv "$fixture"
+        sed -i "$mutation" "$fixture"
+        if CHIKI8_MANIFEST=$fixture "$0" --verify-inputs >"$temp_dir/self-test.log" 2>&1; then
+            printf 'self-test: malformed manifest unexpectedly passed: %s\n' "$mutation" >&2
+            return 1
+        fi
+    done
+    git init -q "$checkout"
+    printf x >"$checkout/rom.ch8"
+    git -C "$checkout" add rom.ch8
+    git -C "$checkout" -c user.name=chiki8 -c user.email=tests@invalid commit -qm fixture
+    if verify_checkout "$checkout" aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa >/dev/null 2>&1; then
+        printf 'self-test: wrong checkout revision unexpectedly passed\n' >&2; return 1
+    fi
+    if verify_rom "$checkout/rom.ch8" aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa >/dev/null 2>&1; then
+        printf 'self-test: wrong ROM hash unexpectedly passed\n' >&2; return 1
     fi
 }
 
@@ -96,9 +128,8 @@ fail_case() {
 git init -q "$suite"
 git -C "$suite" fetch -q --depth 1 "$suite_url" "$suite_commit"
 git -C "$suite" checkout -q --detach FETCH_HEAD
-[[ $(git -C "$suite" rev-parse HEAD) == "$suite_commit" ]] || fail_case 'suite revision mismatch'
-actual_rom_hash=$(sha256sum "$rom" | cut -d ' ' -f 1)
-[[ $actual_rom_hash == "$expected_rom_hash" ]] || fail_case 'ROM SHA-256 mismatch' "$actual_rom_hash"
+verify_checkout "$suite" "$suite_commit" || fail_case 'suite revision mismatch'
+verify_rom "$rom" "$expected_rom_hash" || fail_case 'ROM SHA-256 mismatch'
 
 cargo build --locked --quiet
 env SDL_VIDEODRIVER=dummy SDL_AUDIODRIVER=dummy target/debug/chiki8 \

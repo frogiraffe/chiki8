@@ -226,7 +226,7 @@ fn cli_preflight_valid_overrides_win_over_toml() {
     fs::write(&rom, [0x00, 0xe0]).unwrap();
     fs::write(
         &config,
-        "[display]\nscale = 2\n[emulation]\nprofile = 'superchip-1.1'\n",
+        "[display]\nscale = 2\nbackground = [1, 2, 3]\nforeground = [4, 5, 6]\nfilter = 'nearest'\n[audio]\nvolume = 7\n[emulation]\nspeed = 8\nrefresh = 30\nprofile = 'superchip-1.1'\n",
     )
     .unwrap();
     let output = run(&[
@@ -236,6 +236,14 @@ fn cli_preflight_valid_overrides_win_over_toml() {
         rom.to_str().unwrap(),
         "--scale",
         "3",
+        "--speed",
+        "9",
+        "--volume",
+        "10",
+        "--background",
+        "11,12,13",
+        "--color",
+        "14,15,16",
         "--profile",
         "classic",
         "--refresh",
@@ -246,5 +254,11 @@ fn cli_preflight_valid_overrides_win_over_toml() {
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(stdout.contains("Profile: classic (source: cli)"));
     assert!(stdout.contains("Scale: 3x"));
+    assert!(stdout.contains("Speed: 9x"));
+    assert!(stdout.contains("Volume: 10%"));
+    assert!(stdout.contains("Background: RGB(11, 12, 13)"));
+    assert!(stdout.contains("Foreground: RGB(14, 15, 16)"));
+    assert!(stdout.contains("Refresh: 120 Hz"));
+    assert!(stdout.contains("Filter: linear"));
     fs::remove_dir_all(dir).unwrap();
 }

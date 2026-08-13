@@ -293,7 +293,7 @@ fn main() {
             std::process::exit(2);
         })
         .unwrap_or(config.display.foreground);
-    let _refresh = matches
+    let refresh = matches
         .opt_str("refresh")
         .map(|value| config::parse_refresh("CLI emulation.refresh", &value))
         .transpose()
@@ -302,7 +302,7 @@ fn main() {
             std::process::exit(2);
         })
         .unwrap_or(config.emulation.refresh);
-    let _filter = matches
+    let filter = matches
         .opt_str("filter")
         .map(|value| {
             value
@@ -360,6 +360,14 @@ fn main() {
     println!("Scale: {}x", scale);
     println!("Speed: {}x", speed);
     println!("Volume: {}%", volume);
+    println!("Refresh: {refresh} Hz");
+    println!(
+        "Filter: {}",
+        match filter {
+            config::Filter::Nearest => "nearest",
+            config::Filter::Linear => "linear",
+        }
+    );
     println!(
         "Background: RGB({}, {}, {})",
         background_color[0], background_color[1], background_color[2]

@@ -24,6 +24,18 @@ const FONTSET: [u8; 80] = [
     0xF0, 0x80, 0xF0, 0x80, 0xF0, // E
     0xF0, 0x80, 0xF0, 0x80, 0x80, // F
 ];
+const HIGH_FONT_BASE: usize = FONTSET.len();
+const HIGH_FONT_HEIGHT: usize = 10;
+const HIGH_FONTSET: [u8; 100] = [
+    0x3C, 0x7E, 0xE7, 0xC3, 0xC3, 0xC3, 0xC3, 0xE7, 0x7E, 0x3C, 0x18, 0x38, 0x58, 0x18,
+    0x18, 0x18, 0x18, 0x18, 0x18, 0x3C, 0x3E, 0x7F, 0xC3, 0x06, 0x0C, 0x18, 0x30, 0x60,
+    0xFF, 0xFF, 0x3C, 0x7E, 0xC3, 0x03, 0x0E, 0x0E, 0x03, 0xC3, 0x7E, 0x3C, 0x06, 0x0E,
+    0x1E, 0x36, 0x66, 0xC6, 0xFF, 0xFF, 0x06, 0x06, 0xFF, 0xFF, 0xC0, 0xC0, 0xFC, 0xFE,
+    0x03, 0xC3, 0x7E, 0x3C, 0x3E, 0x7C, 0xE0, 0xC0, 0xFC, 0xFE, 0xC3, 0xC3, 0x7E, 0x3C,
+    0xFF, 0xFF, 0x03, 0x06, 0x0C, 0x18, 0x30, 0x60, 0x60, 0x60, 0x3C, 0x7E, 0xC3, 0xC3,
+    0x7E, 0x7E, 0xC3, 0xC3, 0x7E, 0x3C, 0x3C, 0x7E, 0xC3, 0xC3, 0x7F, 0x3F, 0x03, 0x03,
+    0x3E, 0x7C,
+];
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum Profile {
@@ -76,6 +88,7 @@ pub struct Cpu {
     pub dt: u8,
 
     memory: [u8; 4096],
+    rpl: [u8; 8],
     halted: bool,
     rng: StdRng,
     initial_rng: StdRng,
@@ -122,6 +135,7 @@ impl Cpu {
             dt: 0,
 
             memory: [0; 4096],
+            rpl: [0; 8],
             halted: false,
             initial_rng: rng.clone(),
             rng,
@@ -149,6 +163,7 @@ impl Cpu {
         self.st = 0;
         self.dt = 0;
         self.memory = [0; 4096];
+        self.rpl = [0; 8];
         self.halted = false;
         self.rng = self.initial_rng.clone();
         self.set_fontset();
@@ -172,9 +187,9 @@ impl Cpu {
         Ok(())
     }
     fn set_fontset(&mut self) {
-        for (i, &byte) in FONTSET.iter().enumerate() {
-            self.memory[i] = byte;
-        }
+        self.memory[..FONTSET.len()].copy_from_slice(&FONTSET);
+        self.memory[HIGH_FONT_BASE..HIGH_FONT_BASE + HIGH_FONTSET.len()]
+            .copy_from_slice(&HIGH_FONTSET);
     }
     pub fn timers(&mut self) {
         if self.dt > 0 {
@@ -219,10 +234,18 @@ impl Cpu {
             0x5000 | 0x9000 => opcode & 0x000F == 0,
             0x8000 => matches!(opcode & 0x000F, 0x0..=0x7 | 0xE),
             0xE000 => matches!(opcode & 0x00FF, 0x9E | 0xA1),
-            0xF000 => matches!(
-                opcode & 0x00FF,
-                0x07 | 0x0A | 0x15 | 0x18 | 0x1E | 0x29 | 0x33 | 0x55 | 0x65
-            ),
+            0xF000 => match opcode & 0x00FF {
+                0x07 | 0x0A | 0x15 | 0x18 | 0x1E | 0x29 | 0x33 | 0x55 | 0x65 => true,
+                0x30 => {
+                    let x = ((opcode & 0x0F00) >> 8) as usize;
+                    self.profile == Profile::SuperChip11 && self.v[x] <= 9
+                }
+                0x75 | 0x85 => {
+                    let x = ((opcode & 0x0F00) >> 8) as usize;
+                    self.profile == Profile::SuperChip11 && x <= 7
+                }
+                _ => false,
+            },
             _ => false,
         }
     }
@@ -291,9 +314,12 @@ impl Cpu {
                 0x0018 => self.op_fx18(opcode),
                 0x001E => self.op_fx1e(opcode),
                 0x0029 => self.op_fx29(opcode),
+                0x0030 => self.op_fx30(opcode),
                 0x0033 => self.op_fx33(opcode),
                 0x0055 => self.op_fx55(opcode),
                 0x0065 => self.op_fx65(opcode),
+                0x0075 => self.op_fx75(opcode),
+                0x0085 => self.op_fx85(opcode),
                 _ => unreachable!(),
             },
             _ => unreachable!(),
@@ -374,22 +400,25 @@ impl Cpu {
     fn op_8xy1(&mut self, opcode: u16) {
         let x = ((opcode & 0x0F00) >> 8) as usize;
         let y = ((opcode & 0x00F0) >> 4) as usize;
-        match self.profile {
-            Profile::Classic | Profile::SuperChip11 => self.v[x] |= self.v[y],
+        self.v[x] |= self.v[y];
+        if self.profile == Profile::SuperChip11 {
+            self.v[0xF] = 0;
         }
     }
     fn op_8xy2(&mut self, opcode: u16) {
         let x = ((opcode & 0x0F00) >> 8) as usize;
         let y = ((opcode & 0x00F0) >> 4) as usize;
-        match self.profile {
-            Profile::Classic | Profile::SuperChip11 => self.v[x] &= self.v[y],
+        self.v[x] &= self.v[y];
+        if self.profile == Profile::SuperChip11 {
+            self.v[0xF] = 0;
         }
     }
     fn op_8xy3(&mut self, opcode: u16) {
         let x = ((opcode & 0x0F00) >> 8) as usize;
         let y = ((opcode & 0x00F0) >> 4) as usize;
-        match self.profile {
-            Profile::Classic | Profile::SuperChip11 => self.v[x] ^= self.v[y],
+        self.v[x] ^= self.v[y];
+        if self.profile == Profile::SuperChip11 {
+            self.v[0xF] = 0;
         }
     }
     fn op_8xy4(&mut self, opcode: u16) {
@@ -447,8 +476,10 @@ impl Cpu {
     }
     fn op_bnnn(&mut self, opcode: u16) {
         match self.profile {
-            Profile::Classic | Profile::SuperChip11 => {
-                self.pc = (opcode & 0x0FFF) + self.v[0] as u16
+            Profile::Classic => self.pc = (opcode & 0x0FFF) + self.v[0] as u16,
+            Profile::SuperChip11 => {
+                let x = ((opcode & 0x0F00) >> 8) as usize;
+                self.pc = (opcode & 0x00FF) + self.v[x] as u16;
             }
         }
     }
@@ -581,6 +612,10 @@ impl Cpu {
         let sprite = self.v[x];
         self.i = sprite as usize * 5;
     }
+    fn op_fx30(&mut self, opcode: u16) {
+        let x = ((opcode & 0x0F00) >> 8) as usize;
+        self.i = HIGH_FONT_BASE + self.v[x] as usize * HIGH_FONT_HEIGHT;
+    }
     fn op_fx33(&mut self, opcode: u16) {
         let x = ((opcode & 0x0F00) >> 8) as usize;
         self.memory[self.i] = self.v[x] / 100;
@@ -606,6 +641,14 @@ impl Cpu {
                 }
             }
         }
+    }
+    fn op_fx75(&mut self, opcode: u16) {
+        let x = ((opcode & 0x0F00) >> 8) as usize;
+        self.rpl[..=x].copy_from_slice(&self.v[..=x]);
+    }
+    fn op_fx85(&mut self, opcode: u16) {
+        let x = ((opcode & 0x0F00) >> 8) as usize;
+        self.v[..=x].copy_from_slice(&self.rpl[..=x]);
     }
 
     #[cfg(test)]
@@ -687,6 +730,7 @@ mod tests {
             let st = cpu.st;
             let dt = cpu.dt;
             let memory = cpu.memory;
+            let rpl = cpu.rpl;
             let halted = cpu.halted;
             let mut expected_rng = cpu.rng.clone();
 
@@ -705,6 +749,7 @@ mod tests {
             assert_eq!(cpu.st, st);
             assert_eq!(cpu.dt, dt);
             assert_eq!(cpu.memory, memory);
+            assert_eq!(cpu.rpl, rpl);
             assert_eq!(cpu.halted, halted);
 
             let mut actual_rng = cpu.rng.clone();

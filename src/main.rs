@@ -153,8 +153,8 @@ struct ProfileResolution {
 }
 
 const TIMENDUS_SCROLLING_SHA256: [u8; 32] = [
-    63, 67, 80, 124, 69, 169, 73, 229, 176, 20, 68, 88, 83, 32, 93, 209, 243, 107, 181, 50,
-    207, 37, 186, 162, 34, 9, 183, 195, 0, 197, 150, 215,
+    63, 67, 80, 124, 69, 169, 73, 229, 176, 20, 68, 88, 83, 32, 93, 209, 243, 107, 181, 50, 207,
+    37, 186, 162, 34, 9, 183, 195, 0, 197, 150, 215,
 ];
 
 fn resolve_profile(
@@ -297,12 +297,7 @@ fn main() {
 
     print_keymap();
 
-    let cli_value = |name: &str,
-                     field: &str,
-                     fallback: u32,
-                     min: u32,
-                     max: u32|
-     -> u32 {
+    let cli_value = |name: &str, field: &str, fallback: u32, min: u32, max: u32| -> u32 {
         matches
             .opt_str(name)
             .map(|value| config::parse_bounded_u32(field, &value, min, max))
@@ -362,7 +357,13 @@ fn main() {
             eprintln!("{error}");
             std::process::exit(2);
         })
-        .unwrap_or_else(|| config.display.filter.parse().expect("validated config filter"));
+        .unwrap_or_else(|| {
+            config
+                .display
+                .filter
+                .parse()
+                .expect("validated config filter")
+        });
 
     let file_path: String = match matches.opt_str("f") {
         Some(path) => path,

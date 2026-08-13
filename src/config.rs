@@ -1,5 +1,5 @@
-use serde::Deserialize;
 use sdl2::keyboard::Keycode;
+use serde::Deserialize;
 use std::collections::HashMap;
 use std::fs;
 use std::path::Path;
@@ -180,8 +180,8 @@ impl Config {
     }
 
     fn parse(source: &str, content: &str) -> Result<Self, String> {
-        let raw: toml::Value = toml::from_str(content)
-            .map_err(|error| format!("Config '{source}': {error}"))?;
+        let raw: toml::Value =
+            toml::from_str(content).map_err(|error| format!("Config '{source}': {error}"))?;
         for field in ["background", "foreground"] {
             if let Some(value) = raw.get("display").and_then(|display| display.get(field)) {
                 let valid = value.as_array().is_some_and(|channels| {
@@ -201,8 +201,8 @@ impl Config {
                 }
             }
         }
-        let config: Self = toml::from_str(content)
-            .map_err(|error| format!("Config '{source}': {error}"))?;
+        let config: Self =
+            toml::from_str(content).map_err(|error| format!("Config '{source}': {error}"))?;
         config.validate(source)?;
         Ok(config)
     }
@@ -216,7 +216,11 @@ impl Config {
         validate_range(source, "audio.volume", self.audio.volume, 0, 100)?;
         validate_range(source, "emulation.speed", self.emulation.speed, 1, 1000)?;
         if !matches!(self.emulation.refresh, 30 | 60 | 120) {
-            return Err(field_error(source, "emulation.refresh", "expected 30, 60, or 120"));
+            return Err(field_error(
+                source,
+                "emulation.refresh",
+                "expected 30, 60, or 120",
+            ));
         }
         if let Some(profile) = &self.emulation.profile {
             profile
@@ -254,17 +258,15 @@ fn field_error(source: &str, field: &str, message: &str) -> String {
     format!("Config '{source}' field {field}: {message}")
 }
 
-fn validate_range(
-    source: &str,
-    field: &str,
-    value: u32,
-    min: u32,
-    max: u32,
-) -> Result<(), String> {
+fn validate_range(source: &str, field: &str, value: u32, min: u32, max: u32) -> Result<(), String> {
     if (min..=max).contains(&value) {
         Ok(())
     } else {
-        Err(field_error(source, field, &format!("expected {min} through {max}")))
+        Err(field_error(
+            source,
+            field,
+            &format!("expected {min} through {max}"),
+        ))
     }
 }
 
@@ -368,7 +370,10 @@ mod tests {
         invalid("[audio]\nvolume = 101", "audio.volume");
         invalid("[emulation]\nspeed = 0", "emulation.speed");
         invalid("[emulation]\nrefresh = 59", "emulation.refresh");
-        invalid("[emulation]\nprofile = 'SuperChip-1.1'", "emulation.profile");
+        invalid(
+            "[emulation]\nprofile = 'SuperChip-1.1'",
+            "emulation.profile",
+        );
         invalid("[keymap.keys]\nUnknownKey = 1", "keymap.keys.UnknownKey");
         invalid("[keymap.keys]\nQ = 16", "keymap.keys.Q");
         invalid("[keymap]\nkeys = {}", "keymap.keys");
@@ -377,7 +382,11 @@ mod tests {
     #[test]
     fn strict_color_parser_names_cli_field() {
         assert_eq!(parse_color("CLI background", "1,2,3"), Ok([1, 2, 3]));
-        assert!(parse_color("CLI background", "1,2").unwrap_err().contains("CLI background"));
-        assert!(parse_color("CLI background", "1,2,999").unwrap_err().contains("CLI background"));
+        assert!(parse_color("CLI background", "1,2")
+            .unwrap_err()
+            .contains("CLI background"));
+        assert!(parse_color("CLI background", "1,2,999")
+            .unwrap_err()
+            .contains("CLI background"));
     }
 }

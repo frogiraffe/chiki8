@@ -82,8 +82,9 @@ fn profile_resolution_cli_is_reported_before_sdl() {
     fs::remove_file(rom).unwrap();
 
     assert!(!output.status.success());
-    assert!(String::from_utf8_lossy(&output.stdout)
-        .contains("Profile: superchip-1.1 (source: cli)"));
+    assert!(
+        String::from_utf8_lossy(&output.stdout).contains("Profile: superchip-1.1 (source: cli)")
+    );
 }
 
 #[test]
@@ -142,8 +143,7 @@ fn config_preflight_toml_profile_precedence_and_cli_override() {
         "--file",
         rom.to_str().unwrap(),
     ]);
-    assert!(String::from_utf8_lossy(&toml.stdout)
-        .contains("Profile: superchip-1.1 (source: toml)"));
+    assert!(String::from_utf8_lossy(&toml.stdout).contains("Profile: superchip-1.1 (source: toml)"));
 
     let cli = run(&[
         "--config",

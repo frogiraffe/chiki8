@@ -209,11 +209,13 @@ impl Cpu {
     fn supports_opcode(&self, opcode: u16) -> bool {
         match opcode & 0xF000 {
             0x0000 => match opcode {
-                0x00E0 | 0x00EE => true,
+                0x00E0 => true,
+                0x00EE => self.sp > 0,
                 0x00C1..=0x00CF | 0x00FB..=0x00FF => self.profile == Profile::SuperChip11,
                 _ => false,
             },
-            0x1000..=0x4000 | 0x6000 | 0x7000 | 0xA000..=0xC000 => true,
+            0x1000 | 0x3000 | 0x4000 | 0x6000 | 0x7000 | 0xA000..=0xC000 => true,
+            0x2000 => (self.sp as usize) < self.stack.len(),
             0xD000 => {
                 let rows = (opcode & 0x000F) as usize;
                 let bytes = if rows == 0 {
@@ -234,7 +236,17 @@ impl Cpu {
             0x8000 => matches!(opcode & 0x000F, 0x0..=0x7 | 0xE),
             0xE000 => matches!(opcode & 0x00FF, 0x9E | 0xA1),
             0xF000 => match opcode & 0x00FF {
-                0x07 | 0x0A | 0x15 | 0x18 | 0x1E | 0x29 | 0x33 | 0x55 | 0x65 => true,
+                0x07 | 0x0A | 0x15 | 0x18 | 0x1E | 0x29 => true,
+                0x33 => self
+                    .i
+                    .checked_add(3)
+                    .is_some_and(|end| end <= self.memory.len()),
+                0x55 | 0x65 => {
+                    let x = ((opcode & 0x0F00) >> 8) as usize;
+                    self.i
+                        .checked_add(x + 1)
+                        .is_some_and(|end| end <= self.memory.len())
+                }
                 0x30 => {
                     let x = ((opcode & 0x0F00) >> 8) as usize;
                     self.profile == Profile::SuperChip11 && self.v[x] <= 9

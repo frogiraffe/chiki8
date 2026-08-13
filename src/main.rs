@@ -25,7 +25,9 @@ use audio::*;
 use config::Config;
 use cpu::*;
 use getopts::Options;
+use sha2::{Digest, Sha256};
 use std::env;
+use std::fs;
 use std::path::Path;
 use std::thread;
 use std::time::Duration;
@@ -148,6 +150,66 @@ fn step_outcome_controls_loop(outcome: StepOutcome) -> bool {
     outcome == StepOutcome::Executed
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum ProfileSource {
+    Cli,
+    KnownRom,
+    Fallback,
+}
+
+struct ProfileResolution {
+    profile: Profile,
+    source: ProfileSource,
+}
+
+const TIMENDUS_SCROLLING_SHA256: [u8; 32] = [
+    63, 67, 80, 124, 69, 169, 73, 229, 176, 20, 68, 88, 83, 32, 93, 209, 243, 107, 181, 50,
+    207, 37, 186, 162, 34, 9, 183, 195, 0, 197, 150, 215,
+];
+
+fn resolve_profile(explicit: Option<Profile>, rom: &[u8]) -> ProfileResolution {
+    if let Some(profile) = explicit {
+        return ProfileResolution {
+            profile,
+            source: ProfileSource::Cli,
+        };
+    }
+    // Timendus CHIP-8 test suite v4.2, commit cb24d5595384a80b49ddedae13bec4042b16d41d,
+    // bin/8-scrolling.ch8. This is a selector mapping, not conformance evidence.
+    if profile_for_digest(Sha256::digest(rom).as_slice()).is_some() {
+        return ProfileResolution {
+            profile: Profile::SuperChip11,
+            source: ProfileSource::KnownRom,
+        };
+    }
+    ProfileResolution {
+        profile: Profile::Classic,
+        source: ProfileSource::Fallback,
+    }
+}
+
+fn profile_for_digest(digest: &[u8]) -> Option<Profile> {
+    (digest == TIMENDUS_SCROLLING_SHA256).then_some(Profile::SuperChip11)
+}
+
+fn profile_name(profile: Profile) -> &'static str {
+    match profile {
+        Profile::Classic => "classic",
+        Profile::SuperChip11 => "superchip-1.1",
+    }
+}
+
+fn profile_diagnostic(resolution: &ProfileResolution) -> String {
+    let profile = profile_name(resolution.profile);
+    match resolution.source {
+        ProfileSource::Cli => format!("Profile: {profile} (source: cli)"),
+        ProfileSource::KnownRom => format!("Profile: {profile} (source: known-rom)"),
+        ProfileSource::Fallback => format!(
+            "Profile: {profile} (source: fallback; reason: no explicit profile or known ROM hash match)"
+        ),
+    }
+}
+
 fn main() {
     let args: Vec<String> = env::args().collect();
     let mut opts = Options::new();
@@ -179,18 +241,21 @@ fn main() {
 
     let matches = match opts.parse(&args[1..]) {
         Ok(m) => m,
-        Err(f) => panic!("{}", f),
+        Err(error) => {
+            eprintln!("CLI: {error}");
+            std::process::exit(2);
+        }
     };
 
-    let profile = match matches.opt_str("profile") {
+    let explicit_profile = match matches.opt_str("profile") {
         Some(value) => match value.parse() {
-            Ok(profile) => profile,
+            Ok(profile) => Some(profile),
             Err(error) => {
                 eprintln!("{error}");
                 std::process::exit(2);
             }
         },
-        None => Profile::Classic,
+        None => None,
     };
 
     if matches.opt_present("create-config") {
@@ -224,9 +289,23 @@ fn main() {
 
     print_keymap();
 
-    let file_path: String = matches
-        .opt_str("f")
-        .expect("Please specify ROM file: -f <file_path>");
+    let file_path: String = match matches.opt_str("f") {
+        Some(path) => path,
+        None => {
+            eprintln!("CLI file: Please specify ROM file: -f <file_path>");
+            std::process::exit(2);
+        }
+    };
+    let rom = match fs::read(&file_path) {
+        Ok(rom) => rom,
+        Err(error) => {
+            eprintln!("Could not read ROM '{}': {error}", file_path);
+            std::process::exit(2);
+        }
+    };
+    let resolution = resolve_profile(explicit_profile, &rom);
+    println!("{}", profile_diagnostic(&resolution));
+    let profile = resolution.profile;
 
     let scale: u32 = matches
         .opt_str("s")
@@ -374,5 +453,14 @@ mod tests {
         assert!(step_outcome_controls_loop(StepOutcome::Executed));
         assert!(!step_outcome_controls_loop(StepOutcome::Halted));
         assert!(!step_outcome_controls_loop(StepOutcome::Unsupported));
+    }
+
+    #[test]
+    fn profile_resolution_known_digest_mapping() {
+        assert_eq!(
+            profile_for_digest(&TIMENDUS_SCROLLING_SHA256),
+            Some(Profile::SuperChip11)
+        );
+        assert_eq!(profile_for_digest(&[0; 32]), None);
     }
 }

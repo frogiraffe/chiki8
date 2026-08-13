@@ -501,7 +501,7 @@ impl Cpu {
             Profile::Classic => self.pc = (opcode & 0x0FFF) + self.v[0] as u16,
             Profile::SuperChip11 => {
                 let x = ((opcode & 0x0F00) >> 8) as usize;
-                self.pc = (opcode & 0x00FF) + self.v[x] as u16;
+                self.pc = (opcode & 0x0FFF) + self.v[x] as u16;
             }
         }
     }
@@ -1393,7 +1393,7 @@ mod tests {
                         if profile == Profile::Classic {
                             0x133
                         } else {
-                            0x63
+                            0x163
                         }
                     ),
                     0xC100 => assert_eq!(cpu.v[1], 0, "{profile:?} {name}"),

@@ -23,6 +23,19 @@ fn run(args: &[&str]) -> std::process::Output {
         .expect("run chiki8")
 }
 
+fn temp_dir() -> std::path::PathBuf {
+    let path = std::env::temp_dir().join(format!(
+        "chiki8-config-{}-{}",
+        std::process::id(),
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("system clock")
+            .as_nanos()
+    ));
+    fs::create_dir(&path).unwrap();
+    path
+}
+
 #[test]
 fn superchip_profile_is_accepted_exactly() {
     let output = Command::new(env!("CARGO_BIN_EXE_chiki8"))
@@ -105,4 +118,60 @@ fn rom_preflight_rejects_oversized_rom_before_sdl() {
     assert_eq!(output.status.code(), Some(2));
     assert!(String::from_utf8_lossy(&output.stderr).contains("maximum supported size"));
     assert!(!String::from_utf8_lossy(&output.stderr).contains("chiki8-invalid-driver"));
+}
+
+#[test]
+fn config_preflight_toml_profile_precedence_and_cli_override() {
+    let dir = temp_dir();
+    let rom = dir.join("rom.ch8");
+    let config = dir.join("config.toml");
+    fs::write(&rom, [0x00, 0xfd]).unwrap();
+    fs::write(&config, "[emulation]\nprofile = 'superchip-1.1'\n").unwrap();
+
+    let toml = run(&[
+        "--config",
+        config.to_str().unwrap(),
+        "--file",
+        rom.to_str().unwrap(),
+    ]);
+    assert!(String::from_utf8_lossy(&toml.stdout)
+        .contains("Profile: superchip-1.1 (source: toml)"));
+
+    let cli = run(&[
+        "--config",
+        config.to_str().unwrap(),
+        "--profile",
+        "classic",
+        "--file",
+        rom.to_str().unwrap(),
+    ]);
+    assert!(String::from_utf8_lossy(&cli.stdout).contains("Profile: classic (source: cli)"));
+    fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
+fn config_preflight_explicit_missing_is_status_two() {
+    let output = run(&[
+        "--config",
+        "/definitely/not/a/chiki8-config.toml",
+        "--file",
+        "/also/not/read",
+    ]);
+    assert_eq!(output.status.code(), Some(2));
+    assert!(String::from_utf8_lossy(&output.stderr).contains("Config"));
+}
+
+#[test]
+fn config_preflight_implicit_absence_uses_defaults() {
+    let dir = temp_dir();
+    let rom = dir.join("rom.ch8");
+    fs::write(&rom, [0x00, 0xe0]).unwrap();
+    let output = Command::new(env!("CARGO_BIN_EXE_chiki8"))
+        .args(["--file", rom.to_str().unwrap()])
+        .current_dir(&dir)
+        .env("SDL_VIDEODRIVER", "chiki8-invalid-driver")
+        .output()
+        .unwrap();
+    assert!(String::from_utf8_lossy(&output.stdout).contains("source: fallback"));
+    fs::remove_dir_all(dir).unwrap();
 }

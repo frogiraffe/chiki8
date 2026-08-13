@@ -73,9 +73,18 @@ fn capture_frame_writes_the_final_production_canvas() {
     let capture = temp_path("frame.bmp");
     let output = run_rom(
         &[0x60, 0x00, 0x61, 0x00, 0xa0, 0x00, 0xd0, 0x15, 0x12, 0x08],
-        &["--frames", "2", "--capture-frame", capture.to_str().unwrap()],
+        &[
+            "--frames",
+            "2",
+            "--capture-frame",
+            capture.to_str().unwrap(),
+        ],
     );
-    assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
     let bmp = fs::read(&capture).expect("read captured BMP");
     assert!(bmp.len() > 54);
     assert_eq!(&bmp[..2], b"BM");
@@ -88,7 +97,12 @@ fn capture_frame_names_an_unwritable_destination() {
     fs::create_dir(&destination).unwrap();
     let output = run_rom(
         &[0x12, 0x00],
-        &["--frames", "1", "--capture-frame", destination.to_str().unwrap()],
+        &[
+            "--frames",
+            "1",
+            "--capture-frame",
+            destination.to_str().unwrap(),
+        ],
     );
     assert!(!output.status.success());
     assert!(String::from_utf8_lossy(&output.stderr).contains(destination.to_str().unwrap()));

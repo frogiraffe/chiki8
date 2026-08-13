@@ -284,7 +284,11 @@ fn presentation_preflight_cli_integer_scaling_overrides_toml() {
         .env("SDL_AUDIODRIVER", "dummy")
         .output()
         .unwrap();
-    assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(stdout.contains("Filter: nearest"));
     assert!(stdout.contains("Integer scaling: enabled"));

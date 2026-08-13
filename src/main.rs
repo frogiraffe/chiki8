@@ -17,8 +17,8 @@ use sdl2::keyboard::Keycode;
 use sdl2::pixels::PixelFormatEnum;
 use sdl2::render::{Canvas, ScaleMode, Texture, TextureCreator};
 use sdl2::surface::Surface;
-use sdl2::video::WindowContext;
 use sdl2::video::Window;
+use sdl2::video::WindowContext;
 pub mod audio;
 pub mod config;
 pub mod cpu;
@@ -147,13 +147,13 @@ fn display_pixels(
     let mut pixels = Vec::with_capacity(width * height * 3);
     for y in 0..height {
         for x in 0..width {
-            pixels.extend_from_slice(if display
-                [x * backing_scale + y * backing_scale * PHYSICAL_SCREEN_WIDTH]
-            {
-                foreground
-            } else {
-                background
-            });
+            pixels.extend_from_slice(
+                if display[x * backing_scale + y * backing_scale * PHYSICAL_SCREEN_WIDTH] {
+                    foreground
+                } else {
+                    background
+                },
+            );
         }
     }
     pixels
@@ -321,7 +321,12 @@ fn run() -> Result<(), String> {
     opts.optopt("", "filter", "Texture filter (nearest or linear)", "FILTER");
     opts.optflag("", "integer-scaling", "Use native SDL integer scaling");
     opts.optopt("", "frames", "Stop after N presented frames", "N");
-    opts.optopt("", "capture-frame", "Save final bounded frame as BMP", "PATH");
+    opts.optopt(
+        "",
+        "capture-frame",
+        "Save final bounded frame as BMP",
+        "PATH",
+    );
     opts.optopt(
         "",
         "profile",
@@ -462,7 +467,9 @@ fn run() -> Result<(), String> {
             std::process::exit(2);
         });
     let integer_scaling = matches.opt_present("integer-scaling") || config.display.integer_scaling;
-    let capture_path = matches.opt_str("capture-frame").map(std::path::PathBuf::from);
+    let capture_path = matches
+        .opt_str("capture-frame")
+        .map(std::path::PathBuf::from);
     if capture_path.is_some() && frame_budget.is_none() {
         eprintln!("CLI capture-frame: requires a positive --frames budget");
         std::process::exit(2);
@@ -527,7 +534,8 @@ fn run() -> Result<(), String> {
     }
     println!();
 
-    let sdl_context = sdl2::init().map_err(|error| format!("SDL initialization failed: {error}"))?;
+    let sdl_context =
+        sdl2::init().map_err(|error| format!("SDL initialization failed: {error}"))?;
     let mut sound = Sound::new(&sdl_context, volume_f32);
     let video_subsystem = sdl_context
         .video()
@@ -550,7 +558,11 @@ fn run() -> Result<(), String> {
         .map_err(|error| format!("SDL integer scaling ({integer_scaling}) failed: {error}"))?;
     println!(
         "Integer scaling: {}",
-        if integer_scaling { "enabled" } else { "disabled" }
+        if integer_scaling {
+            "enabled"
+        } else {
+            "disabled"
+        }
     );
     canvas.clear();
     canvas.present();

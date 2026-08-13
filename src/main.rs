@@ -16,6 +16,7 @@ use sdl2::event::Event;
 use sdl2::keyboard::Keycode;
 use sdl2::pixels::PixelFormatEnum;
 use sdl2::render::{Canvas, ScaleMode, Texture, TextureCreator};
+use sdl2::surface::Surface;
 use sdl2::video::WindowContext;
 use sdl2::video::Window;
 pub mod audio;
@@ -92,6 +93,26 @@ fn parse_frames(value: &str) -> Result<u64, String> {
         .ok()
         .filter(|frames| *frames > 0)
         .ok_or_else(|| "CLI frames: expected a positive integer".to_string())
+}
+
+fn capture_canvas(canvas: &mut Canvas<Window>, path: &Path) -> Result<(), String> {
+    let (width, height) = canvas
+        .output_size()
+        .map_err(|error| format!("Could not capture '{}': {error}", path.display()))?;
+    let mut pixels = canvas
+        .read_pixels(None, PixelFormatEnum::RGB24)
+        .map_err(|error| format!("Could not capture '{}': {error}", path.display()))?;
+    let surface = Surface::from_data(
+        &mut pixels,
+        width,
+        height,
+        width * 3,
+        PixelFormatEnum::RGB24,
+    )
+    .map_err(|error| format!("Could not capture '{}': {error}", path.display()))?;
+    surface
+        .save_bmp(path)
+        .map_err(|error| format!("Could not save capture '{}': {error}", path.display()))
 }
 
 fn print_keymap() {
@@ -300,6 +321,7 @@ fn run() -> Result<(), String> {
     opts.optopt("", "filter", "Texture filter (nearest or linear)", "FILTER");
     opts.optflag("", "integer-scaling", "Use native SDL integer scaling");
     opts.optopt("", "frames", "Stop after N presented frames", "N");
+    opts.optopt("", "capture-frame", "Save final bounded frame as BMP", "PATH");
     opts.optopt(
         "",
         "profile",
@@ -440,6 +462,11 @@ fn run() -> Result<(), String> {
             std::process::exit(2);
         });
     let integer_scaling = matches.opt_present("integer-scaling") || config.display.integer_scaling;
+    let capture_path = matches.opt_str("capture-frame").map(std::path::PathBuf::from);
+    if capture_path.is_some() && frame_budget.is_none() {
+        eprintln!("CLI capture-frame: requires a positive --frames budget");
+        std::process::exit(2);
+    }
 
     let file_path: String = match matches.opt_str("f") {
         Some(path) => path,
@@ -593,6 +620,9 @@ fn run() -> Result<(), String> {
             renderer.draw(&mut canvas, &cpu, &background_color, &foreground_color)?;
             presented += 1;
             if frame_budget.is_some_and(|budget| presented >= budget) {
+                if let Some(path) = capture_path.as_deref() {
+                    capture_canvas(&mut canvas, path)?;
+                }
                 break 'emuloop;
             }
         }

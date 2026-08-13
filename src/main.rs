@@ -470,6 +470,40 @@ mod tests {
     use super::*;
 
     #[test]
+    fn scheduler_keeps_cpu_and_timers_independent_from_presentation() {
+        for refresh in [30, 60, 120] {
+            let mut scheduler = Scheduler::new(600, refresh);
+            let mut totals = Work::default();
+            for _ in 0..refresh {
+                totals += scheduler.advance(Duration::from_nanos(1_000_000_000 / refresh as u64));
+            }
+            assert_eq!(totals.cpu_steps, 600, "refresh {refresh}");
+            assert_eq!(totals.timer_ticks, 60, "refresh {refresh}");
+            assert_eq!(totals.presentations, refresh, "refresh {refresh}");
+        }
+    }
+
+    #[test]
+    fn scheduler_carries_fractional_debt_and_clamps_stalls() {
+        let mut scheduler = Scheduler::new(600, 60);
+        let first = scheduler.advance(Duration::from_micros(833));
+        let second = scheduler.advance(Duration::from_micros(834));
+        assert_eq!(first.cpu_steps, 0);
+        assert_eq!(second.cpu_steps, 1);
+
+        let stalled = scheduler.advance(Duration::from_secs(60));
+        assert!(stalled.cpu_steps <= 600 * MAX_CATCH_UP.as_secs() as u32);
+        assert!(stalled.timer_ticks <= 60 * MAX_CATCH_UP.as_secs() as u32);
+    }
+
+    #[test]
+    fn frames_require_a_positive_integer() {
+        assert_eq!(parse_frames("1"), Ok(1));
+        assert!(parse_frames("0").unwrap_err().contains("CLI frames"));
+        assert!(parse_frames("nope").unwrap_err().contains("CLI frames"));
+    }
+
+    #[test]
     fn step_outcome_controls_loop_contract() {
         assert!(step_outcome_controls_loop(StepOutcome::Executed));
         assert!(!step_outcome_controls_loop(StepOutcome::Halted));

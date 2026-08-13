@@ -171,3 +171,41 @@ speed = 10   # Ticks per frame
 "#;
     fs::write(path, example)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn invalid(text: &str, field: &str) {
+        let error = Config::parse("test.toml", text).unwrap_err();
+        assert!(error.contains(field), "{error:?} did not name {field:?}");
+    }
+
+    #[test]
+    fn config_validation_accepts_defaults() {
+        Config::parse("test.toml", "").unwrap();
+    }
+
+    #[test]
+    fn config_validation_rejects_unknown_and_invalid_fields() {
+        invalid("unknown = 1", "unknown");
+        invalid("[display]\nunknown = 1", "unknown");
+        invalid("[display]\nscale = 0", "display.scale");
+        invalid("[display]\nfilter = 'blur'", "display.filter");
+        invalid("[display]\nbackground = [0, 1]", "display.background");
+        invalid("[audio]\nvolume = 101", "audio.volume");
+        invalid("[emulation]\nspeed = 0", "emulation.speed");
+        invalid("[emulation]\nrefresh = 59", "emulation.refresh");
+        invalid("[emulation]\nprofile = 'SuperChip-1.1'", "emulation.profile");
+        invalid("[keymap.keys]\nUnknownKey = 1", "keymap.keys.UnknownKey");
+        invalid("[keymap.keys]\nQ = 16", "keymap.keys.Q");
+        invalid("[keymap]\nkeys = {}", "keymap.keys");
+    }
+
+    #[test]
+    fn strict_color_parser_names_cli_field() {
+        assert_eq!(parse_color("CLI background", "1,2,3"), Ok([1, 2, 3]));
+        assert!(parse_color("CLI background", "1,2").unwrap_err().contains("CLI background"));
+        assert!(parse_color("CLI background", "1,2,999").unwrap_err().contains("CLI background"));
+    }
+}

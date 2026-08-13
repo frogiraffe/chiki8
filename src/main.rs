@@ -27,9 +27,72 @@ use cpu::*;
 use getopts::Options;
 use sha2::{Digest, Sha256};
 use std::env;
+use std::ops::AddAssign;
 use std::path::Path;
 use std::thread;
-use std::time::Duration;
+use std::time::{Duration, Instant};
+
+const MAX_CATCH_UP: Duration = Duration::from_secs(1);
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+struct Work {
+    cpu_steps: u32,
+    timer_ticks: u32,
+    presentations: u32,
+}
+
+impl AddAssign for Work {
+    fn add_assign(&mut self, other: Self) {
+        self.cpu_steps += other.cpu_steps;
+        self.timer_ticks += other.timer_ticks;
+        self.presentations += other.presentations;
+    }
+}
+
+struct Scheduler {
+    cpu_rate: u64,
+    presentation_rate: u64,
+    cpu_debt: u64,
+    timer_debt: u64,
+    presentation_debt: u64,
+}
+
+impl Scheduler {
+    fn new(cpu_rate: u32, presentation_rate: u32) -> Self {
+        Self {
+            cpu_rate: cpu_rate.into(),
+            presentation_rate: presentation_rate.into(),
+            cpu_debt: 0,
+            timer_debt: 0,
+            presentation_debt: 0,
+        }
+    }
+
+    fn advance(&mut self, elapsed: Duration) -> Work {
+        const SECOND_NANOS: u64 = 1_000_000_000;
+        let nanos = elapsed.min(MAX_CATCH_UP).as_nanos() as u64;
+        self.cpu_debt += nanos * self.cpu_rate;
+        self.timer_debt += nanos * 60;
+        self.presentation_debt += nanos * self.presentation_rate;
+        let work = Work {
+            cpu_steps: (self.cpu_debt / SECOND_NANOS) as u32,
+            timer_ticks: (self.timer_debt / SECOND_NANOS) as u32,
+            presentations: (self.presentation_debt / SECOND_NANOS) as u32,
+        };
+        self.cpu_debt %= SECOND_NANOS;
+        self.timer_debt %= SECOND_NANOS;
+        self.presentation_debt %= SECOND_NANOS;
+        work
+    }
+}
+
+fn parse_frames(value: &str) -> Result<u64, String> {
+    value
+        .parse::<u64>()
+        .ok()
+        .filter(|frames| *frames > 0)
+        .ok_or_else(|| "CLI frames: expected a positive integer".to_string())
+}
 
 fn print_keymap() {
     println!("\n╔════════════════════════════════════════════════════════════╗");
@@ -169,6 +232,13 @@ fn profile_diagnostic(resolution: &ProfileResolution) -> String {
 }
 
 fn main() {
+    if let Err(error) = run() {
+        eprintln!("{error}");
+        std::process::exit(1);
+    }
+}
+
+fn run() -> Result<(), String> {
     let args: Vec<String> = env::args().collect();
     let mut opts = Options::new();
     opts.optopt("f", "file", "ROM file", "FILE");
@@ -190,6 +260,7 @@ fn main() {
     opts.optopt("", "config", "Config file path", "PATH");
     opts.optopt("", "refresh", "Refresh rate (30, 60, or 120)", "HZ");
     opts.optopt("", "filter", "Texture filter (nearest or linear)", "FILTER");
+    opts.optopt("", "frames", "Stop after N presented frames", "N");
     opts.optopt(
         "",
         "profile",
@@ -223,7 +294,7 @@ fn main() {
         match config::create_example_config(config_path) {
             Ok(_) => {
                 println!("Example config file created: chiki8.toml");
-                return;
+                return Ok(());
             }
             Err(e) => {
                 eprintln!("Could not create config file: {}", e);
@@ -236,7 +307,7 @@ fn main() {
         print_keymap();
         println!("Usage: {} -f <rom_file> [options]", args[0]);
         println!("{}", opts.usage(""));
-        return;
+        return Ok(());
     }
 
     let explicit_config = matches.opt_str("config");
@@ -321,6 +392,14 @@ fn main() {
                 .parse()
                 .expect("validated config filter")
         });
+    let frame_budget = matches
+        .opt_str("frames")
+        .map(|value| parse_frames(&value))
+        .transpose()
+        .unwrap_or_else(|error| {
+            eprintln!("{error}");
+            std::process::exit(2);
+        });
 
     let file_path: String = match matches.opt_str("f") {
         Some(path) => path,
@@ -381,9 +460,11 @@ fn main() {
     }
     println!();
 
-    let sdl_context = sdl2::init().unwrap();
+    let sdl_context = sdl2::init().map_err(|error| format!("SDL initialization failed: {error}"))?;
     let mut sound = Sound::new(&sdl_context, volume_f32);
-    let video_subsystem = sdl_context.video().unwrap();
+    let video_subsystem = sdl_context
+        .video()
+        .map_err(|error| format!("SDL video initialization failed: {error}"))?;
     let window = video_subsystem
         .window(
             "Chiki8 - CHIP-8 Emulator",
@@ -393,16 +474,24 @@ fn main() {
         .position_centered()
         .opengl()
         .build()
-        .unwrap();
-    let mut canvas = window.into_canvas().build().unwrap();
+        .map_err(|error| format!("SDL window creation failed: {error}"))?;
+    let mut canvas = window
+        .into_canvas()
+        .build()
+        .map_err(|error| format!("SDL canvas creation failed: {error}"))?;
     canvas.clear();
     canvas.present();
-    let mut event_pump = sdl_context.event_pump().unwrap();
+    let mut event_pump = sdl_context
+        .event_pump()
+        .map_err(|error| format!("SDL event initialization failed: {error}"))?;
 
-    use std::time::Instant;
-    let frame_duration = Duration::from_micros(16667);
+    let mut scheduler = Scheduler::new(speed * 60, refresh);
+    let mut previous = Instant::now();
+    let mut presented = 0_u64;
     'emuloop: loop {
-        let frame_start = Instant::now();
+        let now = Instant::now();
+        let work = scheduler.advance(now.duration_since(previous));
+        previous = now;
 
         while let Some(event) = event_pump.poll_event() {
             match event {
@@ -432,7 +521,7 @@ fn main() {
             }
         }
 
-        for _ in 0..speed {
+        for _ in 0..work.cpu_steps {
             let outcome = cpu.tick();
             if !step_outcome_controls_loop(outcome) {
                 if outcome == StepOutcome::Unsupported {
@@ -442,15 +531,9 @@ fn main() {
             }
         }
 
-        draw_screen(
-            &mut canvas,
-            &cpu,
-            &background_color,
-            &foreground_color,
-            scale,
-        );
-
-        cpu.timers();
+        for _ in 0..work.timer_ticks {
+            cpu.timers();
+        }
 
         if cpu.st > 0 {
             play_sound(&mut sound);
@@ -458,11 +541,22 @@ fn main() {
             sound.device.pause()
         }
 
-        let elapsed = frame_start.elapsed();
-        if elapsed < frame_duration {
-            thread::sleep(frame_duration - elapsed);
+        for _ in 0..work.presentations {
+            draw_screen(
+                &mut canvas,
+                &cpu,
+                &background_color,
+                &foreground_color,
+                scale,
+            );
+            presented += 1;
+            if frame_budget.is_some_and(|budget| presented >= budget) {
+                break 'emuloop;
+            }
         }
+        thread::sleep(Duration::from_millis(1));
     }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -474,8 +568,12 @@ mod tests {
         for refresh in [30, 60, 120] {
             let mut scheduler = Scheduler::new(600, refresh);
             let mut totals = Work::default();
-            for _ in 0..refresh {
-                totals += scheduler.advance(Duration::from_nanos(1_000_000_000 / refresh as u64));
+            let base = 1_000_000_000 / refresh as u64;
+            let remainder = 1_000_000_000 % refresh as u64;
+            for frame in 0..refresh {
+                totals += scheduler.advance(Duration::from_nanos(
+                    base + u64::from(frame < remainder as u32),
+                ));
             }
             assert_eq!(totals.cpu_steps, 600, "refresh {refresh}");
             assert_eq!(totals.timer_ticks, 60, "refresh {refresh}");

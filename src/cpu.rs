@@ -92,6 +92,7 @@ pub struct Cpu {
     memory: [u8; 4096],
     rpl: [u8; 8],
     halted: bool,
+    draw_ready: bool,
     rng: StdRng,
     initial_rng: StdRng,
 }
@@ -139,6 +140,7 @@ impl Cpu {
             memory: [0; 4096],
             rpl: [0; 8],
             halted: false,
+            draw_ready: true,
             initial_rng: rng.clone(),
             rng,
         };
@@ -167,6 +169,7 @@ impl Cpu {
         self.memory = [0; 4096];
         self.rpl = [0; 8];
         self.halted = false;
+        self.draw_ready = true;
         self.rng = self.initial_rng.clone();
         self.set_fontset();
     }
@@ -198,6 +201,7 @@ impl Cpu {
             .copy_from_slice(&HIGH_FONTSET);
     }
     pub fn timers(&mut self) {
+        self.draw_ready = true;
         if self.dt > 0 {
             self.dt -= 1;
         }
@@ -206,7 +210,17 @@ impl Cpu {
         }
     }
     pub fn tick(&mut self) -> StepOutcome {
-        self.decode_opcode()
+        let low_resolution_superchip_draw = self.profile == Profile::SuperChip11
+            && self.display_mode == DisplayMode::Low
+            && self.peek_opcode().is_some_and(|opcode| opcode & 0xF000 == 0xD000);
+        if low_resolution_superchip_draw && !self.draw_ready {
+            return StepOutcome::Executed;
+        }
+        let outcome = self.decode_opcode();
+        if low_resolution_superchip_draw && outcome == StepOutcome::Executed {
+            self.draw_ready = false;
+        }
+        outcome
     }
 
     fn peek_opcode(&self) -> Option<u16> {
@@ -423,25 +437,16 @@ impl Cpu {
         let x = ((opcode & 0x0F00) >> 8) as usize;
         let y = ((opcode & 0x00F0) >> 4) as usize;
         self.v[x] |= self.v[y];
-        if self.profile == Profile::SuperChip11 {
-            self.v[0xF] = 0;
-        }
     }
     fn op_8xy2(&mut self, opcode: u16) {
         let x = ((opcode & 0x0F00) >> 8) as usize;
         let y = ((opcode & 0x00F0) >> 4) as usize;
         self.v[x] &= self.v[y];
-        if self.profile == Profile::SuperChip11 {
-            self.v[0xF] = 0;
-        }
     }
     fn op_8xy3(&mut self, opcode: u16) {
         let x = ((opcode & 0x0F00) >> 8) as usize;
         let y = ((opcode & 0x00F0) >> 4) as usize;
         self.v[x] ^= self.v[y];
-        if self.profile == Profile::SuperChip11 {
-            self.v[0xF] = 0;
-        }
     }
     fn op_8xy4(&mut self, opcode: u16) {
         let x = ((opcode & 0x0F00) >> 8) as usize;

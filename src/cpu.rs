@@ -191,6 +191,7 @@ impl Cpu {
     pub(crate) fn set_suite_selector(&mut self, selector: u8) {
         self.memory[0x1ff] = selector;
     }
+
     fn set_fontset(&mut self) {
         self.memory[..FONTSET.len()].copy_from_slice(&FONTSET);
         self.memory[HIGH_FONT_BASE..HIGH_FONT_BASE + HIGH_FONTSET.len()]
@@ -1846,6 +1847,14 @@ mod tests {
         // BNNN - JP V0, addr
         cpu.execute_opcode(0xB100);
         assert_eq!(cpu.get_pc(), 0x110);
+    }
+
+    #[test]
+    fn superchip_bxnn_keeps_the_x_address_nibble() {
+        let mut cpu = Cpu::new(Profile::SuperChip11);
+        cpu.set_v(3, 0x20);
+        cpu.execute_opcode(0xB303);
+        assert_eq!(cpu.get_pc(), 0x323);
     }
 
     #[test]

@@ -172,7 +172,7 @@ impl Cpu {
             .map_err(|error| format!("Could not read ROM '{}': {error}", path.display()))?;
         self.load_rom(&rom)
     }
-    fn load_rom(&mut self, rom: &[u8]) -> Result<(), String> {
+    pub(crate) fn load_rom(&mut self, rom: &[u8]) -> Result<(), String> {
         let start = PROGRAM_START as usize;
         let end = start + rom.len();
         if end > self.memory.len() {

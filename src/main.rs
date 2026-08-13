@@ -304,8 +304,12 @@ fn main() {
         }
     };
     let resolution = resolve_profile(explicit_profile, &rom);
+    let mut cpu = Cpu::new(resolution.profile);
+    if let Err(error) = cpu.load_rom(&rom) {
+        eprintln!("{error}");
+        std::process::exit(2);
+    }
     println!("{}", profile_diagnostic(&resolution));
-    let profile = resolution.profile;
 
     let scale: u32 = matches
         .opt_str("s")
@@ -349,12 +353,6 @@ fn main() {
         println!("Config: {}", config_path);
     }
     println!();
-
-    let mut cpu = Cpu::new(profile);
-    if let Err(error) = cpu.load(Path::new(&file_path)) {
-        eprintln!("{error}");
-        return;
-    }
 
     let sdl_context = sdl2::init().unwrap();
     let mut sound = Sound::new(&sdl_context, volume_f32);

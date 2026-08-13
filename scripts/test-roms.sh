@@ -7,6 +7,13 @@ manifest=${CHIKI8_MANIFEST:-tests/fixtures/vendor/timendus-chip8-test-suite.tsv}
 output=target/conformance.jsonl
 requested_case=
 mode=run
+license_file=tests/fixtures/vendor/LICENSES/Timendus-chip8-test-suite-GPL-3.0.txt
+license_sha256=3972dc9744f6499f0f9b2dbf76696f2ae7ad8af9b23dde66d6af86c9dfb36986
+
+sha256_file() {
+    if command -v sha256sum >/dev/null 2>&1; then sha256sum "$1" | awk '{print $1}';
+    else shasum -a 256 "$1" | awk '{print $1}'; fi
+}
 
 while (($#)); do
     case $1 in
@@ -20,7 +27,9 @@ done
 
 verify_inputs() {
     [[ -f $manifest ]] || { printf 'manifest missing: %s\n' "$manifest" >&2; return 1; }
-    local header suite_revision
+    local header suite_header suite_revision
+    suite_header=$'# suite_url=https://github.com/Timendus/chip8-test-suite.git\tsuite_commit=cb24d5595384a80b49ddedae13bec4042b16d41d\tsuite_license=GPL-3.0-only\tsuite_license_path=LICENSE'
+    [[ $(sed -n '1p' "$manifest") == "$suite_header" ]] || { printf 'manifest suite header mismatch\n' >&2; return 1; }
     header=$'#case_id\tsource_url\tcommit\trom_path\tsha256\tlicense\tlicense_file\tauthor_project\tprofile\tselector\tschedule\tcheckpoint\tpurpose\tclassification\tdimensions\texpected'
     [[ $(sed -n '2p' "$manifest") == "$header" ]] || { printf 'manifest header mismatch\n' >&2; return 1; }
     suite_revision=$(sed -n '1s/.*suite_commit=\([^[:space:]]*\).*/\1/p' "$manifest")
@@ -33,7 +42,7 @@ verify_inputs() {
         $3 !~ /^[0-9a-f]{40}$/ || $3 != suite_revision { print "manifest row " NR ": invalid revision" > "/dev/stderr"; bad=1 }
         $4 !~ /^bin\/[A-Za-z0-9+_.-]+\.ch8$/ { print "manifest row " NR ": unsafe rom_path" > "/dev/stderr"; bad=1 }
         $5 !~ /^[0-9a-f]{64}$/ { print "manifest row " NR ": invalid sha256" > "/dev/stderr"; bad=1 }
-        $6 != "GPL-3.0-only" || $7 == "" || $8 == "" || $11 !~ /^cycles:[1-9][0-9]*$/ || $12 == "" || $13 == "" { print "manifest row " NR ": missing provenance field" > "/dev/stderr"; bad=1 }
+        $6 != "GPL-3.0-only" || $7 != "tests/fixtures/vendor/LICENSES/Timendus-chip8-test-suite-GPL-3.0.txt" || $8 != "Timendus/chip8-test-suite" || $11 !~ /^cycles:[1-9][0-9]*$/ || $12 == "" || $13 == "" { print "manifest row " NR ": invalid provenance field" > "/dev/stderr"; bad=1 }
         $9 != "classic" && $9 != "superchip-1.1" { print "manifest row " NR ": invalid profile" > "/dev/stderr"; bad=1 }
         $10 != "none" && $10 !~ /^memory-0x1ff=[1-5]$/ { print "manifest row " NR ": invalid selector" > "/dev/stderr"; bad=1 }
         $14 != "test-only-transient" { print "manifest row " NR ": invalid classification" > "/dev/stderr"; bad=1 }
@@ -41,7 +50,8 @@ verify_inputs() {
         $16 !~ /^[0-9a-f]{64}$/ { print "manifest row " NR ": invalid expected digest" > "/dev/stderr"; bad=1 }
         END { exit bad }
     ' "$manifest" || return 1
-    [[ -f tests/fixtures/vendor/LICENSES/Timendus-chip8-test-suite-GPL-3.0.txt ]] || { printf 'upstream license copy missing\n' >&2; return 1; }
+    [[ -f $license_file ]] || { printf 'upstream license copy missing\n' >&2; return 1; }
+    [[ $(sha256_file "$license_file") == "$license_sha256" ]] || { printf 'upstream license copy SHA-256 mismatch\n' >&2; return 1; }
     if git ls-files 'tests/fixtures/vendor/*.ch8' 'tests/fixtures/vendor/**/*.ch8' | grep -q .; then
         printf 'tracked external .ch8 fixture violates transient policy\n' >&2; return 1
     fi
@@ -53,7 +63,7 @@ verify_checkout() {
 
 verify_rom() {
     local actual
-    actual=$(sha256sum "$1" | cut -d ' ' -f 1)
+    actual=$(sha256_file "$1")
     [[ $actual == "$2" ]] || { printf 'ROM SHA-256 mismatch: %s\n' "$actual" >&2; return 1; }
 }
 

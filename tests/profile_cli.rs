@@ -183,3 +183,68 @@ fn config_preflight_implicit_absence_uses_defaults() {
     assert!(String::from_utf8_lossy(&output.stdout).contains("source: fallback"));
     fs::remove_dir_all(dir).unwrap();
 }
+
+#[test]
+fn cli_preflight_rejects_every_invalid_override_before_sdl() {
+    let dir = temp_dir();
+    let rom = dir.join("rom.ch8");
+    let config = dir.join("config.toml");
+    fs::write(&rom, [0x00, 0xe0]).unwrap();
+    fs::write(&config, "").unwrap();
+    let base = [
+        "--config",
+        config.to_str().unwrap(),
+        "--file",
+        rom.to_str().unwrap(),
+    ];
+    for (flag, value, field) in [
+        ("--scale", "0", "CLI display.scale"),
+        ("--speed", "0", "CLI emulation.speed"),
+        ("--volume", "101", "CLI audio.volume"),
+        ("--background", "1,2", "CLI display.background"),
+        ("--color", "1,2,999", "CLI display.foreground"),
+        ("--refresh", "59", "CLI emulation.refresh"),
+        ("--filter", "blur", "CLI display.filter"),
+        ("--profile", "invalid", "CLI emulation.profile"),
+    ] {
+        let output = run(&[base[0], base[1], base[2], base[3], flag, value]);
+        assert_eq!(output.status.code(), Some(2), "{flag}");
+        assert!(
+            String::from_utf8_lossy(&output.stderr).contains(field),
+            "{flag}: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+    fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
+fn cli_preflight_valid_overrides_win_over_toml() {
+    let dir = temp_dir();
+    let rom = dir.join("rom.ch8");
+    let config = dir.join("config.toml");
+    fs::write(&rom, [0x00, 0xe0]).unwrap();
+    fs::write(
+        &config,
+        "[display]\nscale = 2\n[emulation]\nprofile = 'superchip-1.1'\n",
+    )
+    .unwrap();
+    let output = run(&[
+        "--config",
+        config.to_str().unwrap(),
+        "--file",
+        rom.to_str().unwrap(),
+        "--scale",
+        "3",
+        "--profile",
+        "classic",
+        "--refresh",
+        "120",
+        "--filter",
+        "linear",
+    ]);
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("Profile: classic (source: cli)"));
+    assert!(stdout.contains("Scale: 3x"));
+    fs::remove_dir_all(dir).unwrap();
+}

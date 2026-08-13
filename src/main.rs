@@ -27,7 +27,6 @@ use cpu::*;
 use getopts::Options;
 use sha2::{Digest, Sha256};
 use std::env;
-use std::fs;
 use std::path::Path;
 use std::thread;
 use std::time::Duration;
@@ -372,10 +371,10 @@ fn main() {
             std::process::exit(2);
         }
     };
-    let rom = match fs::read(&file_path) {
+    let rom = match read_rom(Path::new(&file_path)) {
         Ok(rom) => rom,
         Err(error) => {
-            eprintln!("Could not read ROM '{}': {error}", file_path);
+            eprintln!("{error}");
             std::process::exit(2);
         }
     };

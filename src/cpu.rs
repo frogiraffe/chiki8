@@ -1,4 +1,6 @@
 use rand::{rngs::StdRng, Rng, SeedableRng};
+use std::fs::File;
+use std::io::Read;
 use std::path::Path;
 use std::str::FromStr;
 pub const SCREEN_WIDTH: usize = 64;
@@ -6,6 +8,7 @@ pub const SCREEN_HEIGHT: usize = 32;
 pub const PHYSICAL_SCREEN_WIDTH: usize = 128;
 pub const PHYSICAL_SCREEN_HEIGHT: usize = 64;
 const PROGRAM_START: u16 = 0x200;
+pub(crate) const MAX_ROM_SIZE: usize = 4096 - PROGRAM_START as usize;
 const FONTSET: [u8; 80] = [
     0xF0, 0x90, 0x90, 0x90, 0xF0, // 0
     0x20, 0x60, 0x20, 0x20, 0x70, // 1
@@ -168,8 +171,7 @@ impl Cpu {
         self.set_fontset();
     }
     pub fn load(&mut self, path: &Path) -> Result<(), String> {
-        let rom = std::fs::read(path)
-            .map_err(|error| format!("Could not read ROM '{}': {error}", path.display()))?;
+        let rom = read_rom(path)?;
         self.load_rom(&rom)
     }
     pub(crate) fn load_rom(&mut self, rom: &[u8]) -> Result<(), String> {
@@ -702,6 +704,26 @@ impl Cpu {
     pub fn set_pc(&mut self, pc: u16) {
         self.pc = pc;
     }
+}
+
+pub(crate) fn read_rom(path: &Path) -> Result<Vec<u8>, String> {
+    let file = File::open(path)
+        .map_err(|error| format!("Could not read ROM '{}': {error}", path.display()))?;
+    if file
+        .metadata()
+        .map_err(|error| format!("Could not read ROM '{}': {error}", path.display()))?
+        .len()
+        > MAX_ROM_SIZE as u64
+    {
+        return Err(format!(
+            "ROM is larger than {MAX_ROM_SIZE} bytes; maximum supported size is {MAX_ROM_SIZE} bytes"
+        ));
+    }
+    let mut rom = Vec::with_capacity(MAX_ROM_SIZE);
+    file.take((MAX_ROM_SIZE + 1) as u64)
+        .read_to_end(&mut rom)
+        .map_err(|error| format!("Could not read ROM '{}': {error}", path.display()))?;
+    Ok(rom)
 }
 
 #[cfg(test)]

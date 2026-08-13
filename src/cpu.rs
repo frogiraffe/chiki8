@@ -874,6 +874,177 @@ mod tests {
     }
 
     #[test]
+    fn superchip_state_high_font_endpoints_and_invalid_glyphs_are_bounded() {
+        let mut cpu = Cpu::with_seed(Profile::SuperChip11, 7);
+        assert_eq!(
+            &cpu.memory[HIGH_FONT_BASE..HIGH_FONT_BASE + HIGH_FONTSET.len()],
+            &HIGH_FONTSET
+        );
+
+        for (digit, expected_i) in [
+            (0, HIGH_FONT_BASE),
+            (9, HIGH_FONT_BASE + 9 * HIGH_FONT_HEIGHT),
+        ] {
+            cpu.v[3] = digit;
+            assert_eq!(cpu.execute_opcode(0xF330), StepOutcome::Executed);
+            assert_eq!(cpu.i, expected_i);
+        }
+
+        for digit in [10, 15] {
+            cpu.v[3] = digit;
+            cpu.i = 0x345;
+            let pc = cpu.pc;
+            assert_eq!(cpu.execute_opcode(0xF330), StepOutcome::Unsupported);
+            assert_eq!(cpu.pc, pc);
+            assert_eq!(cpu.i, 0x345);
+        }
+    }
+
+    #[test]
+    fn superchip_state_rpl_uses_exactly_eight_reset_cleared_bytes() {
+        let mut cpu = Cpu::with_seed(Profile::SuperChip11, 7);
+        cpu.v[..8].copy_from_slice(&[1, 2, 3, 4, 5, 6, 7, 8]);
+        assert_eq!(cpu.execute_opcode(0xF075), StepOutcome::Executed);
+        assert_eq!(cpu.rpl, [1, 0, 0, 0, 0, 0, 0, 0]);
+        assert_eq!(cpu.execute_opcode(0xF775), StepOutcome::Executed);
+        assert_eq!(cpu.rpl, [1, 2, 3, 4, 5, 6, 7, 8]);
+
+        cpu.v[..8].fill(0);
+        assert_eq!(cpu.execute_opcode(0xF785), StepOutcome::Executed);
+        assert_eq!(&cpu.v[..8], &[1, 2, 3, 4, 5, 6, 7, 8]);
+
+        for opcode in [0xF875, 0xFF75, 0xF885, 0xFF85] {
+            let rpl = cpu.rpl;
+            let registers = cpu.v;
+            let pc = cpu.pc;
+            assert_eq!(cpu.execute_opcode(opcode), StepOutcome::Unsupported);
+            assert_eq!(cpu.pc, pc);
+            assert_eq!(cpu.rpl, rpl);
+            assert_eq!(cpu.v, registers);
+        }
+
+        cpu.reset();
+        assert_eq!(cpu.rpl, [0; 8]);
+    }
+
+    #[test]
+    fn superchip_state_reset_restores_every_mutable_field_and_is_idempotent() {
+        let mut cpu = Cpu::with_seed(Profile::SuperChip11, 42);
+        cpu.pc = 0x300;
+        cpu.sp = 2;
+        cpu.stack[..2].copy_from_slice(&[0x222, 0x333]);
+        cpu.screen[8191] = true;
+        cpu.display_mode = DisplayMode::High;
+        cpu.keys[15] = true;
+        cpu.prev_keys[0] = true;
+        cpu.waiting_for_key_release = Some(7);
+        cpu.v = [0xAA; 16];
+        cpu.i = 0x345;
+        cpu.st = 8;
+        cpu.dt = 9;
+        cpu.memory = [0xCC; 4096];
+        cpu.rpl = [0xDD; 8];
+        cpu.halted = true;
+        cpu.rng.gen::<u64>();
+
+        cpu.reset();
+        assert_eq!(cpu.profile, Profile::SuperChip11);
+        assert_eq!(cpu.pc, PROGRAM_START);
+        assert_eq!(cpu.sp, 0);
+        assert_eq!(cpu.stack, [0; 16]);
+        assert!(cpu.screen.iter().all(|pixel| !pixel));
+        assert_eq!(cpu.display_mode, DisplayMode::Low);
+        assert_eq!(cpu.keys, [false; 16]);
+        assert_eq!(cpu.prev_keys, [false; 16]);
+        assert_eq!(cpu.waiting_for_key_release, None);
+        assert_eq!(cpu.v, [0; 16]);
+        assert_eq!(cpu.i, 0);
+        assert_eq!(cpu.st, 0);
+        assert_eq!(cpu.dt, 0);
+        assert_eq!(cpu.rpl, [0; 8]);
+        assert!(!cpu.halted);
+        assert_eq!(&cpu.memory[..FONTSET.len()], &FONTSET);
+        assert_eq!(
+            &cpu.memory[HIGH_FONT_BASE..HIGH_FONT_BASE + HIGH_FONTSET.len()],
+            &HIGH_FONTSET
+        );
+        assert!(cpu.memory[HIGH_FONT_BASE + HIGH_FONTSET.len()..]
+            .iter()
+            .all(|byte| *byte == 0));
+
+        let mut expected_rng = Cpu::with_seed(Profile::SuperChip11, 42).rng;
+        assert_eq!(cpu.rng.gen::<u64>(), expected_rng.gen::<u64>());
+        cpu.reset();
+        assert_eq!(cpu.profile, Profile::SuperChip11);
+        assert_eq!(cpu.memory[HIGH_FONT_BASE..HIGH_FONT_BASE + HIGH_FONTSET.len()], HIGH_FONTSET);
+        assert!(cpu.screen.iter().all(|pixel| !pixel));
+        assert_eq!(cpu.rpl, [0; 8]);
+    }
+
+    #[test]
+    fn superchip_state_uses_the_locked_profile_quirk_bundle() {
+        let mut cpu = Cpu::with_seed(Profile::SuperChip11, 7);
+
+        cpu.v[1] = 0b1000_0011;
+        cpu.v[2] = 0b0100_0000;
+        cpu.execute_opcode(0x8126);
+        assert_eq!((cpu.v[1], cpu.v[2], cpu.v[0xF]), (0b0100_0001, 0b0100_0000, 1));
+
+        cpu.i = 0x300;
+        cpu.v[..=2].copy_from_slice(&[1, 2, 3]);
+        cpu.execute_opcode(0xF255);
+        assert_eq!(cpu.i, 0x300);
+        cpu.execute_opcode(0xF265);
+        assert_eq!(cpu.i, 0x300);
+
+        cpu.v[1] = 0x40;
+        cpu.execute_opcode(0xB123);
+        assert_eq!(cpu.pc, 0x63);
+
+        for opcode in [0x8121, 0x8122, 0x8123] {
+            cpu.v[1] = 0x0F;
+            cpu.v[2] = 0xF0;
+            cpu.v[0xF] = 0xAB;
+            cpu.execute_opcode(opcode);
+            assert_eq!(cpu.v[0xF], 0);
+        }
+    }
+
+    #[test]
+    fn superchip_state_rejects_excluded_encodings_without_mutation() {
+        for (opcode, register_value) in [
+            (0x00C0, 0),
+            (0xD010, 0),
+            (0xF030, 10),
+            (0xFF30, 15),
+            (0xF875, 0),
+            (0xFF75, 0),
+            (0xF885, 0),
+            (0xFF85, 0),
+            (0x00D1, 0),
+            (0x00B1, 0),
+        ] {
+            let mut cpu = Cpu::with_seed(Profile::SuperChip11, 7);
+            let x = ((opcode & 0x0F00) >> 8) as usize;
+            cpu.v[x] = register_value;
+            cpu.memory[cpu.pc as usize] = (opcode >> 8) as u8;
+            cpu.memory[cpu.pc as usize + 1] = opcode as u8;
+            let pc = cpu.pc;
+            let registers = cpu.v;
+            let i = cpu.i;
+            let rpl = cpu.rpl;
+            let screen = cpu.screen;
+
+            assert_eq!(cpu.decode_opcode(), StepOutcome::Unsupported, "{opcode:04X}");
+            assert_eq!(cpu.pc, pc, "{opcode:04X}");
+            assert_eq!(cpu.v, registers, "{opcode:04X}");
+            assert_eq!(cpu.i, i, "{opcode:04X}");
+            assert_eq!(cpu.rpl, rpl, "{opcode:04X}");
+            assert_eq!(cpu.screen, screen, "{opcode:04X}");
+        }
+    }
+
+    #[test]
     fn profile_parser_accepts_only_classic() {
         assert_eq!("classic".parse::<Profile>(), Ok(Profile::Classic));
         assert!("Classic".parse::<Profile>().is_err());

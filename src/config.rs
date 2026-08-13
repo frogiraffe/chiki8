@@ -1,9 +1,14 @@
 use serde::Deserialize;
+use sdl2::keyboard::Keycode;
 use std::collections::HashMap;
 use std::fs;
 use std::path::Path;
+use std::str::FromStr;
+
+use crate::cpu::Profile;
 
 #[derive(Debug, Deserialize, Default)]
+#[serde(deny_unknown_fields)]
 pub struct Config {
     #[serde(default)]
     pub display: DisplayConfig,
@@ -16,6 +21,7 @@ pub struct Config {
 }
 
 #[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct DisplayConfig {
     #[serde(default = "default_scale")]
     pub scale: u32,
@@ -23,6 +29,8 @@ pub struct DisplayConfig {
     pub background: [u8; 3],
     #[serde(default = "default_foreground")]
     pub foreground: [u8; 3],
+    #[serde(default = "default_filter")]
+    pub filter: String,
 }
 
 impl Default for DisplayConfig {
@@ -31,6 +39,31 @@ impl Default for DisplayConfig {
             scale: default_scale(),
             background: default_background(),
             foreground: default_foreground(),
+            filter: default_filter(),
+        }
+    }
+}
+
+fn default_filter() -> String {
+    "nearest".to_string()
+}
+
+#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq)]
+#[serde(rename_all = "lowercase")]
+pub enum Filter {
+    #[default]
+    Nearest,
+    Linear,
+}
+
+impl FromStr for Filter {
+    type Err = String;
+
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        match value {
+            "nearest" => Ok(Self::Nearest),
+            "linear" => Ok(Self::Linear),
+            _ => Err(format!("expected 'nearest' or 'linear', got '{value}'")),
         }
     }
 }
@@ -46,6 +79,7 @@ fn default_foreground() -> [u8; 3] {
 }
 
 #[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct AudioConfig {
     #[serde(default = "default_volume")]
     pub volume: u32,
@@ -64,15 +98,22 @@ fn default_volume() -> u32 {
 }
 
 #[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct EmulationConfig {
     #[serde(default = "default_speed")]
     pub speed: u32,
+    #[serde(default = "default_refresh")]
+    pub refresh: u32,
+    #[serde(default)]
+    pub profile: Option<String>,
 }
 
 impl Default for EmulationConfig {
     fn default() -> Self {
         Self {
             speed: default_speed(),
+            refresh: default_refresh(),
+            profile: None,
         }
     }
 }
@@ -80,8 +121,12 @@ impl Default for EmulationConfig {
 fn default_speed() -> u32 {
     10
 }
+fn default_refresh() -> u32 {
+    60
+}
 
 #[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct KeymapConfig {
     #[serde(default = "default_keymap")]
     pub keys: HashMap<String, u8>,
@@ -125,12 +170,114 @@ impl Config {
         let content =
             fs::read_to_string(path).map_err(|e| format!("Could not read config file: {}", e))?;
 
-        toml::from_str(&content).map_err(|e| format!("Config parse error: {}", e))
+        Self::parse(&path.display().to_string(), &content)
+    }
+
+    pub fn load_required(path: &Path) -> Result<Self, String> {
+        let content = fs::read_to_string(path)
+            .map_err(|error| format!("Config '{}': could not read: {error}", path.display()))?;
+        Self::parse(&path.display().to_string(), &content)
+    }
+
+    fn parse(source: &str, content: &str) -> Result<Self, String> {
+        let raw: toml::Value = toml::from_str(content)
+            .map_err(|error| format!("Config '{source}': {error}"))?;
+        for field in ["background", "foreground"] {
+            if let Some(value) = raw.get("display").and_then(|display| display.get(field)) {
+                let valid = value.as_array().is_some_and(|channels| {
+                    channels.len() == 3
+                        && channels.iter().all(|channel| {
+                            channel
+                                .as_integer()
+                                .is_some_and(|channel| (0..=255).contains(&channel))
+                        })
+                });
+                if !valid {
+                    return Err(field_error(
+                        source,
+                        &format!("display.{field}"),
+                        "expected exactly three byte channels",
+                    ));
+                }
+            }
+        }
+        let config: Self = toml::from_str(content)
+            .map_err(|error| format!("Config '{source}': {error}"))?;
+        config.validate(source)?;
+        Ok(config)
+    }
+
+    fn validate(&self, source: &str) -> Result<(), String> {
+        validate_range(source, "display.scale", self.display.scale, 1, 64)?;
+        self.display
+            .filter
+            .parse::<Filter>()
+            .map_err(|error| field_error(source, "display.filter", &error))?;
+        validate_range(source, "audio.volume", self.audio.volume, 0, 100)?;
+        validate_range(source, "emulation.speed", self.emulation.speed, 1, 1000)?;
+        if !matches!(self.emulation.refresh, 30 | 60 | 120) {
+            return Err(field_error(source, "emulation.refresh", "expected 30, 60, or 120"));
+        }
+        if let Some(profile) = &self.emulation.profile {
+            profile
+                .parse::<Profile>()
+                .map_err(|error| field_error(source, "emulation.profile", &error))?;
+        }
+        if self.keymap.keys.is_empty() {
+            return Err(field_error(source, "keymap.keys", "must not be empty"));
+        }
+        for (key, value) in &self.keymap.keys {
+            if Keycode::from_name(key).is_none() {
+                return Err(field_error(
+                    source,
+                    &format!("keymap.keys.{key}"),
+                    "unknown SDL key name",
+                ));
+            }
+            if *value > 15 {
+                return Err(field_error(
+                    source,
+                    &format!("keymap.keys.{key}"),
+                    "expected 0 through 15",
+                ));
+            }
+        }
+        Ok(())
     }
 
     pub fn get_keycode(&self, key_name: &str) -> Option<usize> {
         self.keymap.keys.get(key_name).map(|&v| v as usize)
     }
+}
+
+fn field_error(source: &str, field: &str, message: &str) -> String {
+    format!("Config '{source}' field {field}: {message}")
+}
+
+fn validate_range(
+    source: &str,
+    field: &str,
+    value: u32,
+    min: u32,
+    max: u32,
+) -> Result<(), String> {
+    if (min..=max).contains(&value) {
+        Ok(())
+    } else {
+        Err(field_error(source, field, &format!("expected {min} through {max}")))
+    }
+}
+
+pub fn parse_color(field: &str, value: &str) -> Result<[u8; 3], String> {
+    let channels = value
+        .split(',')
+        .map(str::trim)
+        .map(|channel| channel.parse::<u8>())
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|_| format!("{field}: expected three byte channels R,G,B"))?;
+    channels
+        .try_into()
+        .map_err(|_| format!("{field}: expected exactly three channels R,G,B"))
 }
 
 /// Create example config file
@@ -139,6 +286,7 @@ pub fn create_example_config(path: &Path) -> std::io::Result<()> {
 
 [display]
 scale = 15
+filter = "nearest"
 background = [0, 0, 0]       # Black background
 foreground = [255, 255, 255] # White foreground
 
@@ -147,6 +295,8 @@ volume = 25  # 0-100 range
 
 [emulation]
 speed = 10   # Ticks per frame
+refresh = 60
+profile = "classic"
 
 [keymap]
 # CHIP-8 keys -> Keyboard keys

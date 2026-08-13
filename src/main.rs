@@ -610,6 +610,25 @@ mod tests {
     }
 
     #[test]
+    fn display_pixels_pack_low_resolution_backing_cells() {
+        let mut display = [false; PHYSICAL_SCREEN_WIDTH * PHYSICAL_SCREEN_HEIGHT];
+        display[2 + 4 * PHYSICAL_SCREEN_WIDTH] = true;
+        let pixels = display_pixels(&display, (64, 32), &[1, 2, 3], &[4, 5, 6]);
+        assert_eq!(pixels.len(), 64 * 32 * 3);
+        assert_eq!(&pixels[(1 + 2 * 64) * 3..][..3], &[4, 5, 6]);
+        assert_eq!(&pixels[..3], &[1, 2, 3]);
+    }
+
+    #[test]
+    fn display_pixels_pack_every_high_resolution_pixel() {
+        let mut display = [false; PHYSICAL_SCREEN_WIDTH * PHYSICAL_SCREEN_HEIGHT];
+        display[127 + 63 * PHYSICAL_SCREEN_WIDTH] = true;
+        let pixels = display_pixels(&display, (128, 64), &[0, 0, 0], &[9, 8, 7]);
+        assert_eq!(pixels.len(), 128 * 64 * 3);
+        assert_eq!(&pixels[pixels.len() - 3..], &[9, 8, 7]);
+    }
+
+    #[test]
     fn step_outcome_controls_loop_contract() {
         assert!(step_outcome_controls_loop(StepOutcome::Executed));
         assert!(!step_outcome_controls_loop(StepOutcome::Halted));

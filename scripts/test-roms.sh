@@ -8,14 +8,49 @@ suite_commit=cb24d5595384a80b49ddedae13bec4042b16d41d
 suite_url=https://github.com/Timendus/chip8-test-suite.git
 case_id=chip8-logo
 output=target/conformance-tracer.jsonl
+manifest=tests/fixtures/vendor/timendus-chip8-test-suite.tsv
+mode=run
 
 while (($#)); do
     case $1 in
         --case) case_id=${2:?missing case}; shift 2 ;;
         --output) output=${2:?missing output}; shift 2 ;;
+        --verify-inputs) mode=verify; shift ;;
         *) printf 'unknown argument: %s\n' "$1" >&2; exit 2 ;;
     esac
 done
+
+verify_inputs() {
+    [[ -f $manifest ]] || { printf 'manifest missing: %s\n' "$manifest" >&2; return 1; }
+    [[ $(sed -n '2p' "$manifest") == $'case_id\tsource_url\tcommit\trom_path\tsha256\tlicense\tlicense_file\tauthor_project\tprofile\tselector\tschedule\tcheckpoint\tpurpose\tclassification' ]] || {
+        printf 'manifest header mismatch\n' >&2; return 1;
+    }
+    awk -F '\t' '
+        NR <= 2 { next }
+        NF != 14 { print "manifest row " NR ": expected 14 fields" > "/dev/stderr"; bad=1; next }
+        $1 == "" || seen[$1]++ { print "manifest row " NR ": missing/duplicate case_id" > "/dev/stderr"; bad=1 }
+        $2 !~ /^https:\/\/github.com\/Timendus\/chip8-test-suite.git$/ { print "manifest row " NR ": invalid source_url" > "/dev/stderr"; bad=1 }
+        $3 !~ /^[0-9a-f]{40}$/ { print "manifest row " NR ": invalid commit" > "/dev/stderr"; bad=1 }
+        $4 !~ /^bin\/[A-Za-z0-9+_.-]+\.ch8$/ { print "manifest row " NR ": unsafe rom_path" > "/dev/stderr"; bad=1 }
+        $5 !~ /^[0-9a-f]{64}$/ { print "manifest row " NR ": invalid sha256" > "/dev/stderr"; bad=1 }
+        $6 != "GPL-3.0-only" || $7 == "" || $8 == "" || $11 !~ /^cycles:[1-9][0-9]*$/ || $12 == "" || $13 == "" { print "manifest row " NR ": missing provenance field" > "/dev/stderr"; bad=1 }
+        $9 != "classic" && $9 != "superchip-1.1" { print "manifest row " NR ": invalid profile" > "/dev/stderr"; bad=1 }
+        $10 != "none" && $10 !~ /^memory-0x1ff=[1-4]$/ { print "manifest row " NR ": invalid selector" > "/dev/stderr"; bad=1 }
+        $14 != "test-only-transient" { print "manifest row " NR ": invalid classification" > "/dev/stderr"; bad=1 }
+        END { exit bad }
+    ' "$manifest" || return 1
+    [[ -f tests/fixtures/vendor/LICENSES/Timendus-chip8-test-suite-GPL-3.0.txt ]] || {
+        printf 'upstream license copy missing\n' >&2; return 1;
+    }
+    if git ls-files 'tests/fixtures/vendor/*.ch8' 'tests/fixtures/vendor/**/*.ch8' | grep -q .; then
+        printf 'tracked external .ch8 fixture violates transient policy\n' >&2; return 1
+    fi
+}
+
+if [[ $mode == verify ]]; then
+    verify_inputs
+    exit
+fi
 
 [[ $case_id == chip8-logo ]] || { printf 'unknown case: %s\n' "$case_id" >&2; exit 2; }
 mkdir -p "$(dirname -- "$output")"

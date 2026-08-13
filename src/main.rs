@@ -101,6 +101,14 @@ fn parse_frames(value: &str) -> Result<u64, String> {
         .ok_or_else(|| "CLI frames: expected a positive integer".to_string())
 }
 
+fn parse_cycles(value: &str) -> Result<u64, String> {
+    value
+        .parse::<u64>()
+        .ok()
+        .filter(|cycles| *cycles > 0)
+        .ok_or_else(|| "CLI cycles: expected a positive integer".to_string())
+}
+
 fn capture_canvas(canvas: &mut Canvas<Window>, path: &Path) -> Result<(), String> {
     let (width, height) = canvas
         .output_size()
@@ -327,6 +335,7 @@ fn run() -> Result<(), String> {
     opts.optopt("", "filter", "Texture filter (nearest or linear)", "FILTER");
     opts.optflag("", "integer-scaling", "Use native SDL integer scaling");
     opts.optopt("", "frames", "Stop after N presented frames", "N");
+    opts.optopt("", "cycles", "Stop after N CPU cycles", "N");
     opts.optopt(
         "",
         "capture-frame",
@@ -472,12 +481,24 @@ fn run() -> Result<(), String> {
             eprintln!("{error}");
             std::process::exit(2);
         });
+    let cycle_budget = matches
+        .opt_str("cycles")
+        .map(|value| parse_cycles(&value))
+        .transpose()
+        .unwrap_or_else(|error| {
+            eprintln!("{error}");
+            std::process::exit(2);
+        });
+    if frame_budget.is_some() && cycle_budget.is_some() {
+        eprintln!("CLI stop condition: --frames and --cycles cannot be combined");
+        std::process::exit(2);
+    }
     let integer_scaling = matches.opt_present("integer-scaling") || config.display.integer_scaling;
     let capture_path = matches
         .opt_str("capture-frame")
         .map(std::path::PathBuf::from);
-    if capture_path.is_some() && frame_budget.is_none() {
-        eprintln!("CLI capture-frame: requires a positive --frames budget");
+    if capture_path.is_some() && frame_budget.is_none() && cycle_budget.is_none() {
+        eprintln!("CLI capture-frame: requires a positive --frames or --cycles budget");
         std::process::exit(2);
     }
 
@@ -581,6 +602,7 @@ fn run() -> Result<(), String> {
     let mut scheduler = Scheduler::new(speed * 60, refresh);
     let mut previous = Instant::now();
     let mut presented = 0_u64;
+    let mut executed = 0_u64;
     'emuloop: loop {
         let now = Instant::now();
         let work = scheduler.events(now.duration_since(previous));
@@ -621,6 +643,19 @@ fn run() -> Result<(), String> {
                     if !step_outcome_controls_loop(outcome) {
                         if outcome == StepOutcome::Unsupported {
                             eprintln!("Unsupported opcode");
+                        }
+                        break 'emuloop;
+                    }
+                    executed += 1;
+                    if cycle_budget.is_some_and(|budget| executed >= budget) {
+                        if capture_path.is_some() {
+                            renderer.draw(
+                                &mut canvas,
+                                &cpu,
+                                &background_color,
+                                &foreground_color,
+                            )?;
+                            capture_canvas(&mut canvas, capture_path.as_deref().unwrap())?;
                         }
                         break 'emuloop;
                     }
@@ -724,6 +759,14 @@ mod tests {
         assert_eq!(parse_frames("1"), Ok(1));
         assert!(parse_frames("0").unwrap_err().contains("CLI frames"));
         assert!(parse_frames("nope").unwrap_err().contains("CLI frames"));
+    }
+
+
+    #[test]
+    fn cycles_require_a_positive_integer() {
+        assert_eq!(parse_cycles("1"), Ok(1));
+        assert!(parse_cycles("0").unwrap_err().contains("CLI cycles"));
+        assert!(parse_cycles("nope").unwrap_err().contains("CLI cycles"));
     }
 
     #[test]

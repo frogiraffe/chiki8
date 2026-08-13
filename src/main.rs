@@ -542,7 +542,7 @@ fn run() -> Result<(), String> {
 
     let sdl_context =
         sdl2::init().map_err(|error| format!("SDL initialization failed: {error}"))?;
-    let mut sound = Sound::new(&sdl_context, volume_f32);
+    let mut sound = Sound::new(&sdl_context, volume_f32)?;
     let video_subsystem = sdl_context
         .video()
         .map_err(|error| format!("SDL video initialization failed: {error}"))?;

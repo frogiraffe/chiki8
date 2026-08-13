@@ -50,6 +50,24 @@ fn bounded_run_rejects_invalid_budget_before_sdl() {
 }
 
 #[test]
+fn invalid_audio_driver_returns_an_sdl_audio_error() {
+    let rom = temp_path("rom.ch8");
+    fs::write(&rom, [0x12, 0x00]).expect("write ROM fixture");
+    let output = Command::new(env!("CARGO_BIN_EXE_chiki8"))
+        .args(["--file", rom.to_str().unwrap(), "--frames", "1"])
+        .env("SDL_VIDEODRIVER", "dummy")
+        .env("SDL_AUDIODRIVER", "chiki8-invalid-driver")
+        .output()
+        .expect("run chiki8");
+    fs::remove_file(rom).expect("remove ROM fixture");
+
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert_eq!(output.status.code(), Some(1), "{stderr}");
+    assert!(stderr.contains("SDL audio"), "{stderr}");
+    assert!(!stderr.contains("panicked"), "{stderr}");
+}
+
+#[test]
 fn bounded_run_preserves_cpu_stop_outcomes() {
     for rom in [[0x00, 0xfd], [0x50, 0x01]] {
         let output = run_rom(&rom, &["--profile", "superchip-1.1", "--frames", "20"]);

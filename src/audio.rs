@@ -26,8 +26,10 @@ pub struct Sound {
 }
 
 impl Sound {
-    pub fn new(sdl_context: &Sdl, volume: f32) -> Sound {
-        let audio_subsystem = sdl_context.audio().unwrap();
+    pub fn new(sdl_context: &Sdl, volume: f32) -> Result<Sound, String> {
+        let audio_subsystem = sdl_context
+            .audio()
+            .map_err(|error| format!("SDL audio initialization failed: {error}"))?;
         let desired_spec = AudioSpecDesired {
             freq: Some(44100),
             channels: Some(1),
@@ -39,8 +41,8 @@ impl Sound {
                 phase: 0.0,
                 volume,
             })
-            .unwrap();
-        Sound { device }
+            .map_err(|error| format!("SDL audio playback device failed: {error}"))?;
+        Ok(Sound { device })
     }
 }
 

@@ -37,7 +37,7 @@ verify_inputs() {
     awk -F '\t' -v suite_revision="$suite_revision" '
         NR <= 2 { next }
         NF != 16 { print "manifest row " NR ": expected 16 fields" > "/dev/stderr"; bad=1; next }
-        $1 == "" || seen[$1]++ { print "manifest row " NR ": missing/duplicate case_id" > "/dev/stderr"; bad=1 }
+        $1 !~ /^[A-Za-z0-9_.+-]+$/ || seen[$1]++ { print "manifest row " NR ": invalid/duplicate case_id" > "/dev/stderr"; bad=1 }
         $2 != "https://github.com/Timendus/chip8-test-suite.git" { print "manifest row " NR ": invalid source_url" > "/dev/stderr"; bad=1 }
         $3 !~ /^[0-9a-f]{40}$/ || $3 != suite_revision { print "manifest row " NR ": invalid revision" > "/dev/stderr"; bad=1 }
         $4 !~ /^bin\/[A-Za-z0-9+_.-]+\.ch8$/ { print "manifest row " NR ": unsafe rom_path" > "/dev/stderr"; bad=1 }
@@ -45,6 +45,7 @@ verify_inputs() {
         $6 != "GPL-3.0-only" || $7 != "tests/fixtures/vendor/LICENSES/Timendus-chip8-test-suite-GPL-3.0.txt" || $8 != "Timendus/chip8-test-suite" || $11 !~ /^cycles:[1-9][0-9]*$/ || $12 == "" || $13 == "" { print "manifest row " NR ": invalid provenance field" > "/dev/stderr"; bad=1 }
         $9 != "classic" && $9 != "superchip-1.1" { print "manifest row " NR ": invalid profile" > "/dev/stderr"; bad=1 }
         $10 != "none" && $10 !~ /^memory-0x1ff=[1-5]$/ { print "manifest row " NR ": invalid selector" > "/dev/stderr"; bad=1 }
+        $12 !~ /^[A-Za-z0-9_.+ :\/-]+$/ || $13 !~ /^[A-Za-z0-9_.+ :\/-]+$/ { print "manifest row " NR ": JSON-unsafe checkpoint or purpose" > "/dev/stderr"; bad=1 }
         $14 != "test-only-transient" { print "manifest row " NR ": invalid classification" > "/dev/stderr"; bad=1 }
         $15 != "64x32" && $15 != "128x64" { print "manifest row " NR ": invalid dimensions" > "/dev/stderr"; bad=1 }
         $16 !~ /^[0-9a-f]{64}$/ { print "manifest row " NR ": invalid expected digest" > "/dev/stderr"; bad=1 }
@@ -69,7 +70,7 @@ verify_rom() {
 
 self_test() {
     local fixture=$temp_dir/manifest.tsv checkout=$temp_dir/checkout
-    local mutations=('3s/test-only-transient/release-asset/' '4s/^ibm-logo/chip8-logo/' '5s/[0-9a-f]\{64\}/bad-hash/' '6s/cb24d5595384a80b49ddedae13bec4042b16d41d/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/')
+    local mutations=('3s/test-only-transient/release-asset/' '3s/upstream-39-cycles/upstream-"39-cycles/' '4s/^ibm-logo/chip8-logo/' '5s/[0-9a-f]\{64\}/bad-hash/' '6s/cb24d5595384a80b49ddedae13bec4042b16d41d/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/')
     for mutation in "${mutations[@]}"; do
         cp tests/fixtures/vendor/timendus-chip8-test-suite.tsv "$fixture"
         sed -i "$mutation" "$fixture"

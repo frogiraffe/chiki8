@@ -14,9 +14,9 @@
 //
 use sdl2::event::Event;
 use sdl2::keyboard::Keycode;
-use sdl2::pixels::Color;
-use sdl2::rect::Rect;
-use sdl2::render::Canvas;
+use sdl2::pixels::PixelFormatEnum;
+use sdl2::render::{Canvas, ScaleMode, Texture, TextureCreator};
+use sdl2::video::WindowContext;
 use sdl2::video::Window;
 pub mod audio;
 pub mod config;
@@ -115,44 +115,82 @@ fn print_keymap() {
     println!("╚════════════════════════════════════════════════════════════╝\n");
 }
 
-fn draw_screen(
-    canvas: &mut Canvas<Window>,
-    cpu: &Cpu,
-    background_color: &[u8; 3],
-    foreground_color: &[u8; 3],
-    scale: u32,
-) {
-    canvas.set_draw_color(Color::RGB(
-        background_color[0],
-        background_color[1],
-        background_color[2],
-    ));
-    canvas.clear();
-    let screen_buf = cpu.get_display();
-    let (width, height) = cpu.active_dimensions();
+fn display_pixels(
+    display: &[bool; PHYSICAL_SCREEN_WIDTH * PHYSICAL_SCREEN_HEIGHT],
+    dimensions: (usize, usize),
+    background: &[u8; 3],
+    foreground: &[u8; 3],
+) -> Vec<u8> {
+    let (width, height) = dimensions;
     let backing_scale = PHYSICAL_SCREEN_WIDTH / width;
-    canvas.set_draw_color(Color::RGB(
-        foreground_color[0],
-        foreground_color[1],
-        foreground_color[2],
-    ));
+    let mut pixels = Vec::with_capacity(width * height * 3);
     for y in 0..height {
         for x in 0..width {
-            let pixel = screen_buf[x * backing_scale + y * backing_scale * PHYSICAL_SCREEN_WIDTH];
-            if pixel {
-                match canvas.fill_rect(Rect::new(
-                    x as i32 * scale as i32,
-                    y as i32 * scale as i32,
-                    scale,
-                    scale,
-                )) {
-                    Ok(_) => {}
-                    Err(e) => println!("Error: {}", e),
-                }
-            }
+            pixels.extend_from_slice(if display
+                [x * backing_scale + y * backing_scale * PHYSICAL_SCREEN_WIDTH]
+            {
+                foreground
+            } else {
+                background
+            });
         }
     }
-    canvas.present();
+    pixels
+}
+
+struct Renderer<'a> {
+    creator: &'a TextureCreator<WindowContext>,
+    texture: Option<Texture<'a>>,
+    dimensions: (usize, usize),
+    filter: config::Filter,
+}
+
+impl<'a> Renderer<'a> {
+    fn new(creator: &'a TextureCreator<WindowContext>, filter: config::Filter) -> Self {
+        Self {
+            creator,
+            texture: None,
+            dimensions: (0, 0),
+            filter,
+        }
+    }
+
+    fn draw(
+        &mut self,
+        canvas: &mut Canvas<Window>,
+        cpu: &Cpu,
+        background: &[u8; 3],
+        foreground: &[u8; 3],
+    ) -> Result<(), String> {
+        let dimensions = cpu.active_dimensions();
+        if dimensions != self.dimensions {
+            let (width, height) = dimensions;
+            let mut texture = self
+                .creator
+                .create_texture_streaming(PixelFormatEnum::RGB24, width as u32, height as u32)
+                .map_err(|error| format!("SDL texture creation failed: {error}"))?;
+            texture.set_scale_mode(match self.filter {
+                config::Filter::Nearest => ScaleMode::Nearest,
+                config::Filter::Linear => ScaleMode::Linear,
+            });
+            canvas
+                .set_logical_size(width as u32, height as u32)
+                .map_err(|error| format!("SDL logical size {width}x{height} failed: {error}"))?;
+            self.texture = Some(texture);
+            self.dimensions = dimensions;
+        }
+        let pixels = display_pixels(cpu.get_display(), dimensions, background, foreground);
+        let texture = self.texture.as_mut().expect("texture initialized above");
+        texture
+            .update(None, &pixels, dimensions.0 * 3)
+            .map_err(|error| format!("SDL texture update failed: {error}"))?;
+        canvas.clear();
+        canvas
+            .copy(texture, None, None)
+            .map_err(|error| format!("SDL texture copy failed: {error}"))?;
+        canvas.present();
+        Ok(())
+    }
 }
 
 fn step_outcome_controls_loop(outcome: StepOutcome) -> bool {
@@ -492,6 +530,8 @@ fn run() -> Result<(), String> {
     let mut event_pump = sdl_context
         .event_pump()
         .map_err(|error| format!("SDL event initialization failed: {error}"))?;
+    let texture_creator = canvas.texture_creator();
+    let mut renderer = Renderer::new(&texture_creator, filter);
 
     let mut scheduler = Scheduler::new(speed * 60, refresh);
     let mut previous = Instant::now();
@@ -550,13 +590,7 @@ fn run() -> Result<(), String> {
         }
 
         for _ in 0..work.presentations {
-            draw_screen(
-                &mut canvas,
-                &cpu,
-                &background_color,
-                &foreground_color,
-                scale,
-            );
+            renderer.draw(&mut canvas, &cpu, &background_color, &foreground_color)?;
             presented += 1;
             if frame_budget.is_some_and(|budget| presented >= budget) {
                 break 'emuloop;

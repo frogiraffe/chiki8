@@ -876,6 +876,26 @@ mod tests {
     }
 
     #[test]
+    fn superchip_display_empty_side_clipped_and_colliding_rows_are_distinct() {
+        let mut cpu = Cpu::with_seed(Profile::SuperChip11, 7);
+        cpu.execute_opcode(0x00FF);
+        cpu.i = 0x300;
+        cpu.memory[0x300..0x320].fill(0);
+        assert_eq!(cpu.execute_opcode(0xD010), StepOutcome::Executed);
+        assert!(cpu.screen.iter().all(|pixel| !pixel));
+        assert_eq!(cpu.v[0xF], 0);
+
+        cpu.memory[0x300..0x302].copy_from_slice(&[0x80, 0x01]);
+        cpu.v[0] = 127;
+        assert_eq!(cpu.execute_opcode(0xD010), StepOutcome::Executed);
+        assert!(cpu.screen[127]);
+        assert_eq!(cpu.v[0xF], 0);
+        assert_eq!(cpu.execute_opcode(0xD010), StepOutcome::Executed);
+        assert!(!cpu.screen[127]);
+        assert_eq!(cpu.v[0xF], 1);
+    }
+
+    #[test]
     fn superchip_display_rejects_profile_and_sprite_boundaries_before_mutation() {
         for opcode in [0x00C1, 0x00CF, 0x00FB, 0x00FC, 0x00FE, 0x00FF, 0xD010] {
             let mut cpu = Cpu::with_seed(Profile::Classic, 7);
@@ -1087,6 +1107,36 @@ mod tests {
             assert_eq!(cpu.rpl, rpl, "{opcode:04X}");
             assert_eq!(cpu.screen, screen, "{opcode:04X}");
         }
+    }
+
+    #[test]
+    fn superchip_state_rom_and_sprite_memory_endpoints_are_bounded() {
+        let mut cpu = Cpu::with_seed(Profile::SuperChip11, 7);
+        let initial_memory = cpu.memory;
+        assert_eq!(cpu.load_rom(&[]), Ok(()));
+        assert_eq!(cpu.memory, initial_memory);
+
+        assert_eq!(cpu.load_rom(&[0x60]), Ok(()));
+        assert_eq!(cpu.tick(), StepOutcome::Executed);
+        assert_eq!(cpu.v[0], 0);
+
+        cpu.reset();
+        let capacity = cpu.memory.len() - PROGRAM_START as usize;
+        assert_eq!(cpu.load_rom(&vec![0xAA; capacity]), Ok(()));
+        assert_eq!(cpu.memory[4095], 0xAA);
+        let memory = cpu.memory;
+        assert!(cpu.load_rom(&vec![0xBB; capacity + 1]).is_err());
+        assert_eq!(cpu.memory, memory);
+
+        cpu.reset();
+        cpu.i = 4095;
+        cpu.memory[4095] = 0x80;
+        assert_eq!(cpu.execute_opcode(0xD011), StepOutcome::Executed);
+        let pixels = cpu.screen;
+        let pc = cpu.pc;
+        assert_eq!(cpu.execute_opcode(0xD012), StepOutcome::Unsupported);
+        assert_eq!(cpu.pc, pc);
+        assert_eq!(cpu.screen, pixels);
     }
 
     #[test]

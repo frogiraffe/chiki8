@@ -260,6 +260,7 @@ fn run() -> Result<(), String> {
     opts.optopt("", "config", "Config file path", "PATH");
     opts.optopt("", "refresh", "Refresh rate (30, 60, or 120)", "HZ");
     opts.optopt("", "filter", "Texture filter (nearest or linear)", "FILTER");
+    opts.optflag("", "integer-scaling", "Use native SDL integer scaling");
     opts.optopt("", "frames", "Stop after N presented frames", "N");
     opts.optopt(
         "",
@@ -400,6 +401,7 @@ fn run() -> Result<(), String> {
             eprintln!("{error}");
             std::process::exit(2);
         });
+    let integer_scaling = matches.opt_present("integer-scaling") || config.display.integer_scaling;
 
     let file_path: String = match matches.opt_str("f") {
         Some(path) => path,
@@ -478,6 +480,13 @@ fn run() -> Result<(), String> {
         .into_canvas()
         .build()
         .map_err(|error| format!("SDL canvas creation failed: {error}"))?;
+    canvas
+        .set_integer_scale(integer_scaling)
+        .map_err(|error| format!("SDL integer scaling ({integer_scaling}) failed: {error}"))?;
+    println!(
+        "Integer scaling: {}",
+        if integer_scaling { "enabled" } else { "disabled" }
+    );
     canvas.clear();
     canvas.present();
     let mut event_pump = sdl_context

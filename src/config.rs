@@ -31,6 +31,8 @@ pub struct DisplayConfig {
     pub foreground: [u8; 3],
     #[serde(default = "default_filter")]
     pub filter: String,
+    #[serde(default)]
+    pub integer_scaling: bool,
 }
 
 impl Default for DisplayConfig {
@@ -40,6 +42,7 @@ impl Default for DisplayConfig {
             background: default_background(),
             foreground: default_foreground(),
             filter: default_filter(),
+            integer_scaling: false,
         }
     }
 }
@@ -320,6 +323,7 @@ pub fn create_example_config(path: &Path) -> std::io::Result<()> {
 [display]
 scale = 15
 filter = "nearest"
+integer_scaling = false
 background = [0, 0, 0]       # Black background
 foreground = [255, 255, 255] # White foreground
 

@@ -3,6 +3,7 @@
 [display]
 scale = 15
 filter = "nearest"
+integer_scaling = false
 background = [0, 0, 0]       # Black background
 foreground = [255, 255, 255] # White foreground
 

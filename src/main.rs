@@ -28,26 +28,17 @@ use cpu::*;
 use getopts::Options;
 use sha2::{Digest, Sha256};
 use std::env;
-use std::ops::AddAssign;
 use std::path::Path;
 use std::thread;
 use std::time::{Duration, Instant};
 
 const MAX_CATCH_UP: Duration = Duration::from_secs(1);
 
-#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
-struct Work {
-    cpu_steps: u32,
-    timer_ticks: u32,
-    presentations: u32,
-}
-
-impl AddAssign for Work {
-    fn add_assign(&mut self, other: Self) {
-        self.cpu_steps += other.cpu_steps;
-        self.timer_ticks += other.timer_ticks;
-        self.presentations += other.presentations;
-    }
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum WorkEvent {
+    CpuStep,
+    TimerTick,
+    Presentation,
 }
 
 struct Scheduler {
@@ -69,21 +60,36 @@ impl Scheduler {
         }
     }
 
-    fn advance(&mut self, elapsed: Duration) -> Work {
+    fn events(&mut self, elapsed: Duration) -> Vec<WorkEvent> {
         const SECOND_NANOS: u64 = 1_000_000_000;
-        let nanos = elapsed.min(MAX_CATCH_UP).as_nanos() as u64;
-        self.cpu_debt += nanos * self.cpu_rate;
-        self.timer_debt += nanos * 60;
-        self.presentation_debt += nanos * self.presentation_rate;
-        let work = Work {
-            cpu_steps: (self.cpu_debt / SECOND_NANOS) as u32,
-            timer_ticks: (self.timer_debt / SECOND_NANOS) as u32,
-            presentations: (self.presentation_debt / SECOND_NANOS) as u32,
-        };
-        self.cpu_debt %= SECOND_NANOS;
-        self.timer_debt %= SECOND_NANOS;
-        self.presentation_debt %= SECOND_NANOS;
-        work
+        let mut remaining = elapsed.min(MAX_CATCH_UP).as_nanos() as u64;
+        let mut events = Vec::new();
+        while remaining > 0 {
+            let until_cpu = (SECOND_NANOS - self.cpu_debt).div_ceil(self.cpu_rate);
+            let until_timer = (SECOND_NANOS - self.timer_debt).div_ceil(60);
+            let until_presentation =
+                (SECOND_NANOS - self.presentation_debt).div_ceil(self.presentation_rate);
+            let step = remaining.min(until_cpu.min(until_timer).min(until_presentation));
+            self.cpu_debt += step * self.cpu_rate;
+            self.timer_debt += step * 60;
+            self.presentation_debt += step * self.presentation_rate;
+            remaining -= step;
+
+            // Equal deadlines use a stable CPU, timer, presentation order.
+            if self.cpu_debt >= SECOND_NANOS {
+                self.cpu_debt -= SECOND_NANOS;
+                events.push(WorkEvent::CpuStep);
+            }
+            if self.timer_debt >= SECOND_NANOS {
+                self.timer_debt -= SECOND_NANOS;
+                events.push(WorkEvent::TimerTick);
+            }
+            if self.presentation_debt >= SECOND_NANOS {
+                self.presentation_debt -= SECOND_NANOS;
+                events.push(WorkEvent::Presentation);
+            }
+        }
+        events
     }
 }
 
@@ -577,7 +583,7 @@ fn run() -> Result<(), String> {
     let mut presented = 0_u64;
     'emuloop: loop {
         let now = Instant::now();
-        let work = scheduler.advance(now.duration_since(previous));
+        let work = scheduler.events(now.duration_since(previous));
         previous = now;
 
         while let Some(event) = event_pump.poll_event() {
@@ -608,35 +614,34 @@ fn run() -> Result<(), String> {
             }
         }
 
-        for _ in 0..work.cpu_steps {
-            let outcome = cpu.tick();
-            if !step_outcome_controls_loop(outcome) {
-                if outcome == StepOutcome::Unsupported {
-                    eprintln!("Unsupported opcode");
+        for event in work {
+            match event {
+                WorkEvent::CpuStep => {
+                    let outcome = cpu.tick();
+                    if !step_outcome_controls_loop(outcome) {
+                        if outcome == StepOutcome::Unsupported {
+                            eprintln!("Unsupported opcode");
+                        }
+                        break 'emuloop;
+                    }
                 }
-                break 'emuloop;
+                WorkEvent::TimerTick => cpu.timers(),
+                WorkEvent::Presentation => {
+                    renderer.draw(&mut canvas, &cpu, &background_color, &foreground_color)?;
+                    presented += 1;
+                    if frame_budget.is_some_and(|budget| presented >= budget) {
+                        if let Some(path) = capture_path.as_deref() {
+                            capture_canvas(&mut canvas, path)?;
+                        }
+                        break 'emuloop;
+                    }
+                }
             }
         }
-
-        for _ in 0..work.timer_ticks {
-            cpu.timers();
-        }
-
         if cpu.st > 0 {
             play_sound(&mut sound);
         } else {
             sound.device.pause()
-        }
-
-        for _ in 0..work.presentations {
-            renderer.draw(&mut canvas, &cpu, &background_color, &foreground_color)?;
-            presented += 1;
-            if frame_budget.is_some_and(|budget| presented >= budget) {
-                if let Some(path) = capture_path.as_deref() {
-                    capture_canvas(&mut canvas, path)?;
-                }
-                break 'emuloop;
-            }
         }
         thread::sleep(Duration::from_millis(1));
     }
@@ -647,35 +652,71 @@ fn run() -> Result<(), String> {
 mod tests {
     use super::*;
 
+    fn count(events: Vec<WorkEvent>) -> (u32, u32, u32) {
+        events.into_iter().fold((0, 0, 0), |mut totals, event| {
+            match event {
+                WorkEvent::CpuStep => totals.0 += 1,
+                WorkEvent::TimerTick => totals.1 += 1,
+                WorkEvent::Presentation => totals.2 += 1,
+            }
+            totals
+        })
+    }
+
     #[test]
     fn scheduler_keeps_cpu_and_timers_independent_from_presentation() {
         for refresh in [30, 60, 120] {
             let mut scheduler = Scheduler::new(600, refresh);
-            let mut totals = Work::default();
+            let mut totals = (0, 0, 0);
             let base = 1_000_000_000 / refresh as u64;
             let remainder = 1_000_000_000 % refresh as u64;
             for frame in 0..refresh {
-                totals += scheduler.advance(Duration::from_nanos(
+                let frame_totals = count(scheduler.events(Duration::from_nanos(
                     base + u64::from(frame < remainder as u32),
-                ));
+                )));
+                totals.0 += frame_totals.0;
+                totals.1 += frame_totals.1;
+                totals.2 += frame_totals.2;
             }
-            assert_eq!(totals.cpu_steps, 600, "refresh {refresh}");
-            assert_eq!(totals.timer_ticks, 60, "refresh {refresh}");
-            assert_eq!(totals.presentations, refresh, "refresh {refresh}");
+            assert_eq!(totals.0, 600, "refresh {refresh}");
+            assert_eq!(totals.1, 60, "refresh {refresh}");
+            assert_eq!(totals.2, refresh, "refresh {refresh}");
         }
     }
 
     #[test]
     fn scheduler_carries_fractional_debt_and_clamps_stalls() {
         let mut scheduler = Scheduler::new(600, 60);
-        let first = scheduler.advance(Duration::from_micros(833));
-        let second = scheduler.advance(Duration::from_micros(834));
-        assert_eq!(first.cpu_steps, 0);
-        assert_eq!(second.cpu_steps, 1);
+        let first = count(scheduler.events(Duration::from_micros(833)));
+        let second = count(scheduler.events(Duration::from_micros(834)));
+        assert_eq!(first.0, 0);
+        assert_eq!(second.0, 1);
 
-        let stalled = scheduler.advance(Duration::from_secs(60));
-        assert!(stalled.cpu_steps <= 600 * MAX_CATCH_UP.as_secs() as u32);
-        assert!(stalled.timer_ticks <= 60 * MAX_CATCH_UP.as_secs() as u32);
+        let stalled = count(scheduler.events(Duration::from_secs(60)));
+        assert!(stalled.0 <= 600 * MAX_CATCH_UP.as_secs() as u32);
+        assert!(stalled.1 <= 60 * MAX_CATCH_UP.as_secs() as u32);
+    }
+
+    #[test]
+    fn scheduler_orders_timer_ticks_around_cpu_timer_writes() {
+        let mut scheduler = Scheduler::new(120, 60);
+        let mut cpu_steps = 0;
+        let mut delay_timer: u8 = 0;
+
+        for event in scheduler.events(Duration::from_millis(50)) {
+            match event {
+                WorkEvent::CpuStep => {
+                    cpu_steps += 1;
+                    if cpu_steps == 3 {
+                        delay_timer = 3;
+                    }
+                }
+                WorkEvent::TimerTick => delay_timer = delay_timer.saturating_sub(1),
+                WorkEvent::Presentation => {}
+            }
+        }
+
+        assert_eq!(delay_timer, 1);
     }
 
     #[test]

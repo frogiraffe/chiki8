@@ -1166,15 +1166,39 @@ mod tests {
 
         cpu.v[1] = 0x40;
         cpu.execute_opcode(0xB123);
-        assert_eq!(cpu.pc, 0x63);
+        assert_eq!(cpu.pc, 0x163);
 
         for opcode in [0x8121, 0x8122, 0x8123] {
             cpu.v[1] = 0x0F;
             cpu.v[2] = 0xF0;
             cpu.v[0xF] = 0xAB;
             cpu.execute_opcode(opcode);
-            assert_eq!(cpu.v[0xF], 0);
+            assert_eq!(cpu.v[0xF], 0xAB);
         }
+    }
+
+    #[test]
+    fn superchip_legacy_waits_for_vblank_only_between_low_resolution_draws() {
+        let mut low = Cpu::with_seed(Profile::SuperChip11, 7);
+        low.i = 0x300;
+        low.memory[0x300] = 0x80;
+        low.load_rom(&[0xD0, 0x11, 0xD0, 0x11]).unwrap();
+        assert_eq!(low.tick(), StepOutcome::Executed);
+        assert_eq!(low.pc, 0x202);
+        assert_eq!(low.tick(), StepOutcome::Executed);
+        assert_eq!(low.pc, 0x202);
+        low.timers();
+        assert_eq!(low.tick(), StepOutcome::Executed);
+        assert_eq!(low.pc, 0x204);
+
+        let mut high = Cpu::with_seed(Profile::SuperChip11, 7);
+        high.display_mode = DisplayMode::High;
+        high.i = 0x300;
+        high.memory[0x300] = 0x80;
+        high.load_rom(&[0xD0, 0x11, 0xD0, 0x11]).unwrap();
+        assert_eq!(high.tick(), StepOutcome::Executed);
+        assert_eq!(high.tick(), StepOutcome::Executed);
+        assert_eq!(high.pc, 0x204);
     }
 
     #[test]

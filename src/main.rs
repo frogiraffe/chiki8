@@ -109,6 +109,14 @@ fn parse_cycles(value: &str) -> Result<u64, String> {
         .ok_or_else(|| "CLI cycles: expected a positive integer".to_string())
 }
 
+fn parse_suite_selector(value: &str) -> Result<u8, String> {
+    value
+        .parse::<u8>()
+        .ok()
+        .filter(|selector| (1..=5).contains(selector))
+        .ok_or_else(|| "CLI suite-selector: expected an integer from 1 through 5".to_string())
+}
+
 fn capture_canvas(canvas: &mut Canvas<Window>, path: &Path) -> Result<(), String> {
     let (width, height) = canvas
         .output_size()
@@ -338,6 +346,12 @@ fn run() -> Result<(), String> {
     opts.optopt("", "cycles", "Stop after N CPU cycles", "N");
     opts.optopt(
         "",
+        "suite-selector",
+        "Set Timendus test selector at memory 0x1FF",
+        "N",
+    );
+    opts.optopt(
+        "",
         "capture-frame",
         "Save final bounded frame as BMP",
         "PATH",
@@ -489,6 +503,14 @@ fn run() -> Result<(), String> {
             eprintln!("{error}");
             std::process::exit(2);
         });
+    let suite_selector = matches
+        .opt_str("suite-selector")
+        .map(|value| parse_suite_selector(&value))
+        .transpose()
+        .unwrap_or_else(|error| {
+            eprintln!("{error}");
+            std::process::exit(2);
+        });
     if frame_budget.is_some() && cycle_budget.is_some() {
         eprintln!("CLI stop condition: --frames and --cycles cannot be combined");
         std::process::exit(2);
@@ -531,6 +553,9 @@ fn run() -> Result<(), String> {
     if let Err(error) = cpu.load_rom(&rom) {
         eprintln!("{error}");
         std::process::exit(2);
+    }
+    if let Some(selector) = suite_selector {
+        cpu.set_suite_selector(selector);
     }
     println!("{}", profile_diagnostic(&resolution));
 

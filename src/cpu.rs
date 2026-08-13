@@ -187,6 +187,10 @@ impl Cpu {
         self.memory[start..end].copy_from_slice(rom);
         Ok(())
     }
+
+    pub(crate) fn set_suite_selector(&mut self, selector: u8) {
+        self.memory[0x1ff] = selector;
+    }
     fn set_fontset(&mut self) {
         self.memory[..FONTSET.len()].copy_from_slice(&FONTSET);
         self.memory[HIGH_FONT_BASE..HIGH_FONT_BASE + HIGH_FONTSET.len()]

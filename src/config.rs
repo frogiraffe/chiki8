@@ -231,11 +231,18 @@ impl Config {
             return Err(field_error(source, "keymap.keys", "must not be empty"));
         }
         for (key, value) in &self.keymap.keys {
-            if Keycode::from_name(key).is_none() {
+            let Some(keycode) = Keycode::from_name(key) else {
                 return Err(field_error(
                     source,
                     &format!("keymap.keys.{key}"),
                     "unknown SDL key name",
+                ));
+            };
+            if keycode == Keycode::Escape {
+                return Err(field_error(
+                    source,
+                    &format!("keymap.keys.{key}"),
+                    "reserved for quitting",
                 ));
             }
             if *value > 15 {
@@ -366,6 +373,13 @@ mod tests {
     fn validated_sdl_key_is_available_to_runtime_dispatch() {
         let config = Config::parse("test.toml", "[keymap.keys]\nSpace = 1").unwrap();
         assert_eq!(config.get_keycode(Keycode::Space), Some(1));
+    }
+
+    #[test]
+    fn config_validation_rejects_reserved_escape_key() {
+        let error = Config::parse("test.toml", "[keymap.keys]\nEscape = 1").unwrap_err();
+        assert!(error.contains("keymap.keys.Escape"), "{error}");
+        assert!(error.contains("reserved"), "{error}");
     }
 
     #[test]

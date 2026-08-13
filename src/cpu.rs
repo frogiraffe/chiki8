@@ -491,6 +491,109 @@ mod tests {
     use super::*;
 
     #[test]
+    fn superchip_profile_outcome_contract() {
+        assert_eq!(
+            "superchip-1.1".parse::<Profile>(),
+            Ok(Profile::SuperChip11)
+        );
+        assert!("SuperChip-1.1".parse::<Profile>().is_err());
+        assert!("not-a-profile".parse::<Profile>().is_err());
+
+        let mut cpu = Cpu::with_seed(Profile::Classic, 7);
+        assert_eq!(cpu.execute_opcode(0x6001), StepOutcome::Executed);
+        assert_eq!(cpu.v[0], 1);
+
+        fn assert_unsupported_without_mutation(profile: Profile, opcode: u16) {
+            let mut cpu = Cpu::with_seed(profile, 7);
+            cpu.pc = 0x300;
+            cpu.sp = 1;
+            cpu.stack[0] = 0x234;
+            cpu.screen[3] = true;
+            cpu.keys[4] = true;
+            cpu.prev_keys[5] = true;
+            cpu.waiting_for_key_release = Some(6);
+            cpu.v[7] = 8;
+            cpu.i = 0x345;
+            cpu.st = 9;
+            cpu.dt = 10;
+            cpu.memory[cpu.pc as usize] = (opcode >> 8) as u8;
+            cpu.memory[cpu.pc as usize + 1] = opcode as u8;
+
+            let pc = cpu.pc;
+            let sp = cpu.sp;
+            let stack = cpu.stack;
+            let screen = cpu.screen;
+            let keys = cpu.keys;
+            let prev_keys = cpu.prev_keys;
+            let waiting_for_key_release = cpu.waiting_for_key_release;
+            let v = cpu.v;
+            let i = cpu.i;
+            let st = cpu.st;
+            let dt = cpu.dt;
+            let memory = cpu.memory;
+            let halted = cpu.halted;
+            let mut expected_rng = cpu.rng.clone();
+
+            assert_eq!(cpu.decode_opcode(), StepOutcome::Unsupported);
+            assert_eq!(cpu.profile, profile);
+            assert_eq!(cpu.pc, pc);
+            assert_eq!(cpu.sp, sp);
+            assert_eq!(cpu.stack, stack);
+            assert_eq!(cpu.screen, screen);
+            assert_eq!(cpu.keys, keys);
+            assert_eq!(cpu.prev_keys, prev_keys);
+            assert_eq!(cpu.waiting_for_key_release, waiting_for_key_release);
+            assert_eq!(cpu.v, v);
+            assert_eq!(cpu.i, i);
+            assert_eq!(cpu.st, st);
+            assert_eq!(cpu.dt, dt);
+            assert_eq!(cpu.memory, memory);
+            assert_eq!(cpu.halted, halted);
+
+            let mut actual_rng = cpu.rng.clone();
+            assert_eq!(actual_rng.gen::<u64>(), expected_rng.gen::<u64>());
+        }
+
+        assert_unsupported_without_mutation(Profile::Classic, 0x00FD);
+        assert_unsupported_without_mutation(Profile::SuperChip11, 0x5011);
+
+        let mut cpu = Cpu::with_seed(Profile::SuperChip11, 7);
+        assert_eq!(cpu.execute_opcode(0x00FD), StepOutcome::Halted);
+        assert!(cpu.halted);
+        let pc = cpu.pc;
+        let memory = cpu.memory;
+        assert_eq!(cpu.tick(), StepOutcome::Halted);
+        assert_eq!(cpu.pc, pc);
+        assert_eq!(cpu.memory, memory);
+    }
+
+    #[test]
+    fn seeded_random_sequence_repeats_after_reset() {
+        let mut first = Cpu::with_seed(Profile::Classic, 42);
+        let mut second = Cpu::with_seed(Profile::Classic, 42);
+
+        let mut first_sequence = [0; 4];
+        let mut second_sequence = [0; 4];
+        for value in &mut first_sequence {
+            assert_eq!(first.execute_opcode(0xC0FF), StepOutcome::Executed);
+            *value = first.v[0];
+        }
+        for value in &mut second_sequence {
+            assert_eq!(second.execute_opcode(0xC0FF), StepOutcome::Executed);
+            *value = second.v[0];
+        }
+        assert_eq!(first_sequence, second_sequence);
+
+        first.reset();
+        let mut reset_sequence = [0; 4];
+        for value in &mut reset_sequence {
+            assert_eq!(first.execute_opcode(0xC0FF), StepOutcome::Executed);
+            *value = first.v[0];
+        }
+        assert_eq!(reset_sequence, first_sequence);
+    }
+
+    #[test]
     fn profile_parser_accepts_only_classic() {
         assert_eq!("classic".parse::<Profile>(), Ok(Profile::Classic));
         assert!("Classic".parse::<Profile>().is_err());

@@ -125,6 +125,25 @@ fn cycle_budget_preserves_cpu_stop_outcomes() {
 }
 
 #[test]
+fn cycle_budget_captures_a_halted_final_canvas() {
+    let capture = temp_path("halted-cycle-frame.bmp");
+    let output = run_rom(
+        &[0x00, 0xff, 0x00, 0xfd],
+        &[
+            "--profile",
+            "superchip-1.1",
+            "--cycles",
+            "20",
+            "--capture-frame",
+            capture.to_str().unwrap(),
+        ],
+    );
+    assert!(output.status.success());
+    assert_eq!(&fs::read(&capture).expect("read halted capture")[..2], b"BM");
+    fs::remove_file(capture).unwrap();
+}
+
+#[test]
 fn suite_selector_rejects_values_outside_the_documented_range_before_sdl() {
     for value in ["0", "6", "nope"] {
         let output = Command::new(env!("CARGO_BIN_EXE_chiki8"))

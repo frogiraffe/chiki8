@@ -280,6 +280,28 @@ pub fn parse_color(field: &str, value: &str) -> Result<[u8; 3], String> {
         .map_err(|_| format!("{field}: expected exactly three channels R,G,B"))
 }
 
+pub fn parse_bounded_u32(field: &str, value: &str, min: u32, max: u32) -> Result<u32, String> {
+    let parsed = value
+        .parse::<u32>()
+        .map_err(|_| format!("{field}: expected an integer from {min} through {max}"))?;
+    if (min..=max).contains(&parsed) {
+        Ok(parsed)
+    } else {
+        Err(format!("{field}: expected {min} through {max}"))
+    }
+}
+
+pub fn parse_refresh(field: &str, value: &str) -> Result<u32, String> {
+    let refresh = value
+        .parse::<u32>()
+        .map_err(|_| format!("{field}: expected 30, 60, or 120"))?;
+    if matches!(refresh, 30 | 60 | 120) {
+        Ok(refresh)
+    } else {
+        Err(format!("{field}: expected 30, 60, or 120"))
+    }
+}
+
 /// Create example config file
 pub fn create_example_config(path: &Path) -> std::io::Result<()> {
     let example = r#"# Chiki8 CHIP-8 Emulator Configuration File

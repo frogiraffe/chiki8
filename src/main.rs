@@ -135,17 +135,6 @@ fn keycode_to_string(key: Keycode) -> Option<String> {
     }
 }
 
-fn parse_color(s: &str) -> [u8; 3] {
-    let mut iter = s
-        .split(',')
-        .map(|num_str| num_str.trim().parse().unwrap_or(0));
-    [
-        iter.next().unwrap_or(0),
-        iter.next().unwrap_or(0),
-        iter.next().unwrap_or(0),
-    ]
-}
-
 fn step_outcome_controls_loop(outcome: StepOutcome) -> bool {
     outcome == StepOutcome::Executed
 }
@@ -242,6 +231,8 @@ fn main() {
         "COLOR",
     );
     opts.optopt("", "config", "Config file path", "PATH");
+    opts.optopt("", "refresh", "Refresh rate (30, 60, or 120)", "HZ");
+    opts.optopt("", "filter", "Texture filter (nearest or linear)", "FILTER");
     opts.optopt(
         "",
         "profile",
@@ -263,7 +254,7 @@ fn main() {
         Some(value) => match value.parse() {
             Ok(profile) => Some(profile),
             Err(error) => {
-                eprintln!("{error}");
+                eprintln!("CLI emulation.profile: {error}");
                 std::process::exit(2);
             }
         },
@@ -306,6 +297,73 @@ fn main() {
 
     print_keymap();
 
+    let cli_value = |name: &str,
+                     field: &str,
+                     fallback: u32,
+                     min: u32,
+                     max: u32|
+     -> u32 {
+        matches
+            .opt_str(name)
+            .map(|value| config::parse_bounded_u32(field, &value, min, max))
+            .transpose()
+            .unwrap_or_else(|error| {
+                eprintln!("{error}");
+                std::process::exit(2);
+            })
+            .unwrap_or(fallback)
+    };
+
+    let scale = cli_value("scale", "CLI display.scale", config.display.scale, 1, 64);
+    let speed = cli_value(
+        "speed",
+        "CLI emulation.speed",
+        config.emulation.speed,
+        1,
+        1000,
+    );
+    let volume = cli_value("volume", "CLI audio.volume", config.audio.volume, 0, 100);
+    let background_color = matches
+        .opt_str("background")
+        .map(|value| config::parse_color("CLI display.background", &value))
+        .transpose()
+        .unwrap_or_else(|error| {
+            eprintln!("{error}");
+            std::process::exit(2);
+        })
+        .unwrap_or(config.display.background);
+    let foreground_color = matches
+        .opt_str("color")
+        .map(|value| config::parse_color("CLI display.foreground", &value))
+        .transpose()
+        .unwrap_or_else(|error| {
+            eprintln!("{error}");
+            std::process::exit(2);
+        })
+        .unwrap_or(config.display.foreground);
+    let _refresh = matches
+        .opt_str("refresh")
+        .map(|value| config::parse_refresh("CLI emulation.refresh", &value))
+        .transpose()
+        .unwrap_or_else(|error| {
+            eprintln!("{error}");
+            std::process::exit(2);
+        })
+        .unwrap_or(config.emulation.refresh);
+    let _filter = matches
+        .opt_str("filter")
+        .map(|value| {
+            value
+                .parse::<config::Filter>()
+                .map_err(|error| format!("CLI display.filter: {error}"))
+        })
+        .transpose()
+        .unwrap_or_else(|error| {
+            eprintln!("{error}");
+            std::process::exit(2);
+        })
+        .unwrap_or_else(|| config.display.filter.parse().expect("validated config filter"));
+
     let file_path: String = match matches.opt_str("f") {
         Some(path) => path,
         None => {
@@ -338,31 +396,7 @@ fn main() {
     }
     println!("{}", profile_diagnostic(&resolution));
 
-    let scale: u32 = matches
-        .opt_str("s")
-        .map(|s| s.parse().unwrap_or(config.display.scale))
-        .unwrap_or(config.display.scale);
-
-    let speed: u32 = matches
-        .opt_str("p")
-        .map(|s| s.parse().unwrap_or(config.emulation.speed))
-        .unwrap_or(config.emulation.speed);
-
-    let volume: u32 = matches
-        .opt_str("v")
-        .map(|s| s.parse().unwrap_or(config.audio.volume))
-        .unwrap_or(config.audio.volume);
-    let volume_f32 = (volume.min(100) as f32) / 100.0;
-
-    let background_color: [u8; 3] = matches
-        .opt_str("b")
-        .map(|s| parse_color(&s))
-        .unwrap_or(config.display.background);
-
-    let foreground_color: [u8; 3] = matches
-        .opt_str("c")
-        .map(|s| parse_color(&s))
-        .unwrap_or(config.display.foreground);
+    let volume_f32 = (volume as f32) / 100.0;
 
     println!("ROM: {}", file_path);
     println!("Scale: {}x", scale);

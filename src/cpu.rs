@@ -1,4 +1,4 @@
-use rand::Rng;
+use rand::{rngs::StdRng, Rng, SeedableRng};
 use std::path::Path;
 use std::str::FromStr;
 pub const SCREEN_WIDTH: usize = 64;
@@ -26,6 +26,7 @@ const FONTSET: [u8; 80] = [
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum Profile {
     Classic,
+    SuperChip11,
 }
 
 impl FromStr for Profile {
@@ -34,9 +35,19 @@ impl FromStr for Profile {
     fn from_str(value: &str) -> Result<Self, Self::Err> {
         match value {
             "classic" => Ok(Self::Classic),
-            _ => Err(format!("unknown profile '{value}'; expected 'classic'")),
+            "superchip-1.1" => Ok(Self::SuperChip11),
+            _ => Err(format!(
+                "unknown profile '{value}'; expected 'classic' or 'superchip-1.1'"
+            )),
         }
     }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum StepOutcome {
+    Executed,
+    Unsupported,
+    Halted,
 }
 
 pub struct Cpu {
@@ -56,6 +67,9 @@ pub struct Cpu {
     pub dt: u8,
 
     memory: [u8; 4096],
+    halted: bool,
+    rng: StdRng,
+    initial_rng: StdRng,
 }
 
 impl Cpu {
@@ -71,6 +85,10 @@ impl Cpu {
         }
     }
     pub fn new(profile: Profile) -> Cpu {
+        Self::with_rng(profile, StdRng::from_entropy())
+    }
+
+    fn with_rng(profile: Profile, rng: StdRng) -> Cpu {
         let mut cpu = Cpu {
             profile,
             pc: PROGRAM_START,
@@ -88,9 +106,17 @@ impl Cpu {
             dt: 0,
 
             memory: [0; 4096],
+            halted: false,
+            initial_rng: rng.clone(),
+            rng,
         };
         cpu.set_fontset();
         cpu
+    }
+
+    #[cfg(test)]
+    fn with_seed(profile: Profile, seed: u64) -> Cpu {
+        Self::with_rng(profile, StdRng::seed_from_u64(seed))
     }
 
     pub fn reset(&mut self) {
@@ -106,6 +132,8 @@ impl Cpu {
         self.st = 0;
         self.dt = 0;
         self.memory = [0; 4096];
+        self.halted = false;
+        self.rng = self.initial_rng.clone();
         self.set_fontset();
     }
     pub fn load(&mut self, path: &Path) -> Result<(), String> {
@@ -139,29 +167,60 @@ impl Cpu {
             self.st -= 1;
         }
     }
-    pub fn tick(&mut self) {
-        self.decode_opcode();
+    pub fn tick(&mut self) -> StepOutcome {
+        self.decode_opcode()
     }
-    fn fetch_opcode(&mut self) -> u16 {
-        let opcode =
-            (self.memory[self.pc as usize] as u16) << 8 | self.memory[self.pc as usize + 1] as u16;
+
+    fn peek_opcode(&self) -> u16 {
+        (self.memory[self.pc as usize] as u16) << 8 | self.memory[self.pc as usize + 1] as u16
+    }
+
+    fn supports_opcode(&self, opcode: u16) -> bool {
+        match opcode & 0xF000 {
+            0x0000 => match opcode {
+                0x00E0 | 0x00EE => true,
+                0x00FD => self.profile == Profile::SuperChip11,
+                _ => false,
+            },
+            0x1000..=0x4000 | 0x6000 | 0x7000 | 0xA000..=0xD000 => true,
+            0x5000 | 0x9000 => opcode & 0x000F == 0,
+            0x8000 => matches!(opcode & 0x000F, 0x0..=0x7 | 0xE),
+            0xE000 => matches!(opcode & 0x00FF, 0x9E | 0xA1),
+            0xF000 => matches!(
+                opcode & 0x00FF,
+                0x07 | 0x0A | 0x15 | 0x18 | 0x1E | 0x29 | 0x33 | 0x55 | 0x65
+            ),
+            _ => false,
+        }
+    }
+
+    pub fn decode_opcode(&mut self) -> StepOutcome {
+        if self.halted {
+            return StepOutcome::Halted;
+        }
+
+        let opcode = self.peek_opcode();
+        if !self.supports_opcode(opcode) {
+            return StepOutcome::Unsupported;
+        }
         self.pc += 2;
-        opcode
-    }
-    pub fn decode_opcode(&mut self) {
-        let opcode: u16 = self.fetch_opcode();
+
         match opcode & 0xF000 {
             0x0000 => match opcode {
                 0x00E0 => self.op_00e0(),
                 0x00EE => self.op_00ee(),
-                _ => println!("Unknown opcode: {:X}", opcode),
+                0x00FD => {
+                    self.halted = true;
+                    return StepOutcome::Halted;
+                }
+                _ => unreachable!(),
             },
             0x1000 => self.op_1nnn(opcode),
             0x2000 => self.op_2nnn(opcode),
             0x3000 => self.op_3xkk(opcode),
             0x4000 => self.op_4xkk(opcode),
             0x5000 if opcode & 0x000F == 0 => self.op_5xy0(opcode),
-            0x5000 => println!("Unknown opcode: {:X}", opcode),
+            0x5000 => unreachable!(),
             0x6000 => self.op_6xkk(opcode),
             0x7000 => self.op_7xkk(opcode),
             0x8000 => match opcode & 0x000F {
@@ -174,10 +233,10 @@ impl Cpu {
                 0x0006 => self.op_8xy6(opcode),
                 0x0007 => self.op_8xy7(opcode),
                 0x000E => self.op_8xye(opcode),
-                _ => println!("Unknown opcode: {:X}", opcode),
+                _ => unreachable!(),
             },
             0x9000 if opcode & 0x000F == 0 => self.op_9xy0(opcode),
-            0x9000 => println!("Unknown opcode: {:X}", opcode),
+            0x9000 => unreachable!(),
             0xA000 => self.op_annn(opcode),
             0xB000 => self.op_bnnn(opcode),
             0xC000 => self.op_cxkk(opcode),
@@ -185,7 +244,7 @@ impl Cpu {
             0xE000 => match opcode & 0x00FF {
                 0x009E => self.op_ex9e(opcode),
                 0x00A1 => self.op_exa1(opcode),
-                _ => println!("Unknown opcode: {:X}", opcode),
+                _ => unreachable!(),
             },
             0xF000 => match opcode & 0x00FF {
                 0x0007 => self.op_fx07(opcode),
@@ -197,10 +256,11 @@ impl Cpu {
                 0x0033 => self.op_fx33(opcode),
                 0x0055 => self.op_fx55(opcode),
                 0x0065 => self.op_fx65(opcode),
-                _ => println!("Unknown opcode: {:X}", opcode),
+                _ => unreachable!(),
             },
-            _ => println!("Unknown opcode: {:X}", opcode),
+            _ => unreachable!(),
         }
+        StepOutcome::Executed
     }
 
     fn op_00e0(&mut self) {
@@ -258,21 +318,21 @@ impl Cpu {
         let x = ((opcode & 0x0F00) >> 8) as usize;
         let y = ((opcode & 0x00F0) >> 4) as usize;
         match self.profile {
-            Profile::Classic => self.v[x] |= self.v[y],
+            Profile::Classic | Profile::SuperChip11 => self.v[x] |= self.v[y],
         }
     }
     fn op_8xy2(&mut self, opcode: u16) {
         let x = ((opcode & 0x0F00) >> 8) as usize;
         let y = ((opcode & 0x00F0) >> 4) as usize;
         match self.profile {
-            Profile::Classic => self.v[x] &= self.v[y],
+            Profile::Classic | Profile::SuperChip11 => self.v[x] &= self.v[y],
         }
     }
     fn op_8xy3(&mut self, opcode: u16) {
         let x = ((opcode & 0x0F00) >> 8) as usize;
         let y = ((opcode & 0x00F0) >> 4) as usize;
         match self.profile {
-            Profile::Classic => self.v[x] ^= self.v[y],
+            Profile::Classic | Profile::SuperChip11 => self.v[x] ^= self.v[y],
         }
     }
     fn op_8xy4(&mut self, opcode: u16) {
@@ -295,7 +355,7 @@ impl Cpu {
         let x = ((opcode & 0x0F00) >> 8) as usize;
         let vx = self.v[x];
         match self.profile {
-            Profile::Classic => {
+            Profile::Classic | Profile::SuperChip11 => {
                 self.v[x] = vx >> 1;
                 self.v[0xF] = vx & 1;
             }
@@ -312,7 +372,7 @@ impl Cpu {
         let x = ((opcode & 0x0F00) >> 8) as usize;
         let vx = self.v[x];
         match self.profile {
-            Profile::Classic => {
+            Profile::Classic | Profile::SuperChip11 => {
                 self.v[x] = vx << 1;
                 self.v[0xF] = vx >> 7;
             }
@@ -330,14 +390,15 @@ impl Cpu {
     }
     fn op_bnnn(&mut self, opcode: u16) {
         match self.profile {
-            Profile::Classic => self.pc = (opcode & 0x0FFF) + self.v[0] as u16,
+            Profile::Classic | Profile::SuperChip11 => {
+                self.pc = (opcode & 0x0FFF) + self.v[0] as u16
+            }
         }
     }
     fn op_cxkk(&mut self, opcode: u16) {
-        let mut rng = rand::thread_rng();
         let x = ((opcode & 0x0F00) >> 8) as usize;
         let kk = (opcode & 0x00FF) as u8;
-        self.v[x] = rng.gen::<u8>() & kk;
+        self.v[x] = self.rng.gen::<u8>() & kk;
     }
     fn op_dxyn(&mut self, opcode: u16) {
         let x = ((opcode & 0x0F00) >> 8) as usize;
@@ -350,7 +411,7 @@ impl Cpu {
             for x_offset in 0..8 {
                 if (pixel & (0x80 >> x_offset)) != 0 {
                     let (x, y) = match self.profile {
-                        Profile::Classic => (
+                        Profile::Classic | Profile::SuperChip11 => (
                             (self.v[x] as usize + x_offset) % SCREEN_WIDTH,
                             (self.v[y] as usize + y_offset as usize) % SCREEN_HEIGHT,
                         ),
@@ -435,7 +496,7 @@ impl Cpu {
     fn op_fx55(&mut self, opcode: u16) {
         let x = ((opcode & 0x0F00) >> 8) as usize;
         match self.profile {
-            Profile::Classic => {
+            Profile::Classic | Profile::SuperChip11 => {
                 for i in 0..=x {
                     self.memory[self.i + i] = self.v[i];
                 }
@@ -445,7 +506,7 @@ impl Cpu {
     fn op_fx65(&mut self, opcode: u16) {
         let x = ((opcode & 0x0F00) >> 8) as usize;
         match self.profile {
-            Profile::Classic => {
+            Profile::Classic | Profile::SuperChip11 => {
                 for i in 0..=x {
                     self.v[i] = self.memory[self.i + i];
                 }
@@ -454,10 +515,13 @@ impl Cpu {
     }
 
     #[cfg(test)]
-    pub fn execute_opcode(&mut self, opcode: u16) {
+    pub fn execute_opcode(&mut self, opcode: u16) -> StepOutcome {
+        if self.halted {
+            return StepOutcome::Halted;
+        }
         self.memory[self.pc as usize] = (opcode >> 8) as u8;
         self.memory[self.pc as usize + 1] = (opcode & 0xFF) as u8;
-        self.decode_opcode();
+        self.decode_opcode()
     }
 
     #[cfg(test)]
@@ -492,10 +556,7 @@ mod tests {
 
     #[test]
     fn superchip_profile_outcome_contract() {
-        assert_eq!(
-            "superchip-1.1".parse::<Profile>(),
-            Ok(Profile::SuperChip11)
-        );
+        assert_eq!("superchip-1.1".parse::<Profile>(), Ok(Profile::SuperChip11));
         assert!("SuperChip-1.1".parse::<Profile>().is_err());
         assert!("not-a-profile".parse::<Profile>().is_err());
 
@@ -1145,9 +1206,10 @@ mod tests {
         cpu.set_v(1, 0x42);
         let pc_before = cpu.get_pc();
 
-        cpu.execute_opcode(0x5011);
+        let outcome = cpu.execute_opcode(0x5011);
 
-        assert_eq!(cpu.get_pc(), pc_before + 2);
+        assert_eq!(outcome, StepOutcome::Unsupported);
+        assert_eq!(cpu.get_pc(), pc_before);
     }
 
     #[test]
@@ -1157,9 +1219,10 @@ mod tests {
         cpu.set_v(1, 0x43);
         let pc_before = cpu.get_pc();
 
-        cpu.execute_opcode(0x9011);
+        let outcome = cpu.execute_opcode(0x9011);
 
-        assert_eq!(cpu.get_pc(), pc_before + 2);
+        assert_eq!(outcome, StepOutcome::Unsupported);
+        assert_eq!(cpu.get_pc(), pc_before);
     }
 
     #[test]

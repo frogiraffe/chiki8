@@ -262,3 +262,31 @@ fn cli_preflight_valid_overrides_win_over_toml() {
     assert!(stdout.contains("Filter: linear"));
     fs::remove_dir_all(dir).unwrap();
 }
+
+#[test]
+fn presentation_preflight_cli_integer_scaling_overrides_toml() {
+    let dir = temp_dir();
+    let rom = dir.join("rom.ch8");
+    let config = dir.join("config.toml");
+    fs::write(&rom, [0x12, 0x00]).unwrap();
+    fs::write(&config, "[display]\ninteger_scaling = false\n").unwrap();
+    let output = Command::new(env!("CARGO_BIN_EXE_chiki8"))
+        .args([
+            "--config",
+            config.to_str().unwrap(),
+            "--file",
+            rom.to_str().unwrap(),
+            "--integer-scaling",
+            "--frames",
+            "1",
+        ])
+        .env("SDL_VIDEODRIVER", "dummy")
+        .env("SDL_AUDIODRIVER", "dummy")
+        .output()
+        .unwrap();
+    assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("Filter: nearest"));
+    assert!(stdout.contains("Integer scaling: enabled"));
+    fs::remove_dir_all(dir).unwrap();
+}

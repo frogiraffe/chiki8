@@ -366,7 +366,18 @@ mod tests {
 
     #[test]
     fn config_validation_accepts_defaults() {
-        Config::parse("test.toml", "").unwrap();
+        let config = Config::parse("test.toml", "").unwrap();
+        assert!(!config.display.integer_scaling);
+    }
+
+    #[test]
+    fn config_validation_accepts_only_boolean_integer_scaling() {
+        let config = Config::parse("test.toml", "[display]\ninteger_scaling = true").unwrap();
+        assert!(config.display.integer_scaling);
+        invalid(
+            "[display]\ninteger_scaling = 'yes'",
+            "integer_scaling",
+        );
     }
 
     #[test]

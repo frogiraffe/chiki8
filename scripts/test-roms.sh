@@ -16,6 +16,7 @@ while (($#)); do
         --case) case_id=${2:?missing case}; shift 2 ;;
         --output) output=${2:?missing output}; shift 2 ;;
         --verify-inputs) mode=verify; shift ;;
+        --self-test) mode=self-test; shift ;;
         *) printf 'unknown argument: %s\n' "$1" >&2; exit 2 ;;
     esac
 done
@@ -47,8 +48,24 @@ verify_inputs() {
     fi
 }
 
+self_test() {
+    local fixture=$temp_dir/manifest.tsv
+    cp "$manifest" "$fixture"
+    sed -i '3s/test-only-transient/release-asset/' "$fixture"
+    if CHIKI8_MANIFEST=$fixture "$0" --verify-inputs >"$temp_dir/self-test.log" 2>&1; then
+        printf 'self-test: invalid classification unexpectedly passed\n' >&2
+        return 1
+    fi
+}
+
 if [[ $mode == verify ]]; then
     verify_inputs
+    exit
+fi
+if [[ $mode == self-test ]]; then
+    temp_dir=$(mktemp -d)
+    trap 'rm -rf "$temp_dir"' EXIT
+    self_test
     exit
 fi
 

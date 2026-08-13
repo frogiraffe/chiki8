@@ -3,17 +3,14 @@ set -euo pipefail
 
 repo_root=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
 cd "$repo_root"
-
-suite_commit=cb24d5595384a80b49ddedae13bec4042b16d41d
-suite_url=https://github.com/Timendus/chip8-test-suite.git
-case_id=chip8-logo
-output=target/conformance-tracer.jsonl
 manifest=${CHIKI8_MANIFEST:-tests/fixtures/vendor/timendus-chip8-test-suite.tsv}
+output=target/conformance.jsonl
+requested_case=
 mode=run
 
 while (($#)); do
     case $1 in
-        --case) case_id=${2:?missing case}; shift 2 ;;
+        --case) requested_case=${2:?missing case}; shift 2 ;;
         --output) output=${2:?missing output}; shift 2 ;;
         --verify-inputs) mode=verify; shift ;;
         --self-test) mode=self-test; shift ;;
@@ -23,48 +20,41 @@ done
 
 verify_inputs() {
     [[ -f $manifest ]] || { printf 'manifest missing: %s\n' "$manifest" >&2; return 1; }
-    [[ $(sed -n '2p' "$manifest") == $'case_id\tsource_url\tcommit\trom_path\tsha256\tlicense\tlicense_file\tauthor_project\tprofile\tselector\tschedule\tcheckpoint\tpurpose\tclassification' ]] || {
-        printf 'manifest header mismatch\n' >&2; return 1;
-    }
-    local suite_revision
+    local header suite_revision
+    header=$'#case_id\tsource_url\tcommit\trom_path\tsha256\tlicense\tlicense_file\tauthor_project\tprofile\tselector\tschedule\tcheckpoint\tpurpose\tclassification\tdimensions\texpected'
+    [[ $(sed -n '2p' "$manifest") == "$header" ]] || { printf 'manifest header mismatch\n' >&2; return 1; }
     suite_revision=$(sed -n '1s/.*suite_commit=\([^[:space:]]*\).*/\1/p' "$manifest")
     [[ $suite_revision =~ ^[0-9a-f]{40}$ ]] || { printf 'manifest suite commit invalid\n' >&2; return 1; }
     awk -F '\t' -v suite_revision="$suite_revision" '
         NR <= 2 { next }
-        NF != 14 { print "manifest row " NR ": expected 14 fields" > "/dev/stderr"; bad=1; next }
+        NF != 16 { print "manifest row " NR ": expected 16 fields" > "/dev/stderr"; bad=1; next }
         $1 == "" || seen[$1]++ { print "manifest row " NR ": missing/duplicate case_id" > "/dev/stderr"; bad=1 }
-        $2 !~ /^https:\/\/github.com\/Timendus\/chip8-test-suite.git$/ { print "manifest row " NR ": invalid source_url" > "/dev/stderr"; bad=1 }
-        $3 !~ /^[0-9a-f]{40}$/ { print "manifest row " NR ": invalid commit" > "/dev/stderr"; bad=1 }
-        $3 != suite_revision { print "manifest row " NR ": revision differs from suite header" > "/dev/stderr"; bad=1 }
+        $2 != "https://github.com/Timendus/chip8-test-suite.git" { print "manifest row " NR ": invalid source_url" > "/dev/stderr"; bad=1 }
+        $3 !~ /^[0-9a-f]{40}$/ || $3 != suite_revision { print "manifest row " NR ": invalid revision" > "/dev/stderr"; bad=1 }
         $4 !~ /^bin\/[A-Za-z0-9+_.-]+\.ch8$/ { print "manifest row " NR ": unsafe rom_path" > "/dev/stderr"; bad=1 }
         $5 !~ /^[0-9a-f]{64}$/ { print "manifest row " NR ": invalid sha256" > "/dev/stderr"; bad=1 }
         $6 != "GPL-3.0-only" || $7 == "" || $8 == "" || $11 !~ /^cycles:[1-9][0-9]*$/ || $12 == "" || $13 == "" { print "manifest row " NR ": missing provenance field" > "/dev/stderr"; bad=1 }
         $9 != "classic" && $9 != "superchip-1.1" { print "manifest row " NR ": invalid profile" > "/dev/stderr"; bad=1 }
-        $10 != "none" && $10 !~ /^memory-0x1ff=[1-4]$/ { print "manifest row " NR ": invalid selector" > "/dev/stderr"; bad=1 }
+        $10 != "none" && $10 !~ /^memory-0x1ff=[1-5]$/ { print "manifest row " NR ": invalid selector" > "/dev/stderr"; bad=1 }
         $14 != "test-only-transient" { print "manifest row " NR ": invalid classification" > "/dev/stderr"; bad=1 }
+        $15 != "64x32" && $15 != "128x64" { print "manifest row " NR ": invalid dimensions" > "/dev/stderr"; bad=1 }
+        $16 !~ /^[0-9a-f]{64}$/ { print "manifest row " NR ": invalid expected digest" > "/dev/stderr"; bad=1 }
         END { exit bad }
     ' "$manifest" || return 1
-    [[ -f tests/fixtures/vendor/LICENSES/Timendus-chip8-test-suite-GPL-3.0.txt ]] || {
-        printf 'upstream license copy missing\n' >&2; return 1;
-    }
+    [[ -f tests/fixtures/vendor/LICENSES/Timendus-chip8-test-suite-GPL-3.0.txt ]] || { printf 'upstream license copy missing\n' >&2; return 1; }
     if git ls-files 'tests/fixtures/vendor/*.ch8' 'tests/fixtures/vendor/**/*.ch8' | grep -q .; then
         printf 'tracked external .ch8 fixture violates transient policy\n' >&2; return 1
     fi
 }
 
 verify_checkout() {
-    local checkout=$1 expected=$2
-    [[ $(git -C "$checkout" rev-parse HEAD 2>/dev/null) == "$expected" ]] || {
-        printf 'suite revision mismatch\n' >&2; return 1;
-    }
+    [[ $(git -C "$1" rev-parse HEAD 2>/dev/null) == "$2" ]] || { printf 'suite revision mismatch\n' >&2; return 1; }
 }
 
 verify_rom() {
-    local rom_path=$1 expected=$2 actual
-    actual=$(sha256sum "$rom_path" | cut -d ' ' -f 1)
-    [[ $actual == "$expected" ]] || {
-        printf 'ROM SHA-256 mismatch: %s\n' "$actual" >&2; return 1;
-    }
+    local actual
+    actual=$(sha256sum "$1" | cut -d ' ' -f 1)
+    [[ $actual == "$2" ]] || { printf 'ROM SHA-256 mismatch: %s\n' "$actual" >&2; return 1; }
 }
 
 self_test() {
@@ -74,85 +64,87 @@ self_test() {
         cp tests/fixtures/vendor/timendus-chip8-test-suite.tsv "$fixture"
         sed -i "$mutation" "$fixture"
         if CHIKI8_MANIFEST=$fixture "$0" --verify-inputs >"$temp_dir/self-test.log" 2>&1; then
-            printf 'self-test: malformed manifest unexpectedly passed: %s\n' "$mutation" >&2
-            return 1
+            printf 'self-test: malformed manifest unexpectedly passed: %s\n' "$mutation" >&2; return 1
         fi
     done
     git init -q "$checkout"
     printf x >"$checkout/rom.ch8"
     git -C "$checkout" add rom.ch8
     git -C "$checkout" -c user.name=chiki8 -c user.email=tests@invalid commit -qm fixture
-    if verify_checkout "$checkout" aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa >/dev/null 2>&1; then
-        printf 'self-test: wrong checkout revision unexpectedly passed\n' >&2; return 1
-    fi
-    if verify_rom "$checkout/rom.ch8" aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa >/dev/null 2>&1; then
-        printf 'self-test: wrong ROM hash unexpectedly passed\n' >&2; return 1
-    fi
+    ! verify_checkout "$checkout" aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa >/dev/null 2>&1 || return 1
+    ! verify_rom "$checkout/rom.ch8" aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa >/dev/null 2>&1 || return 1
 }
 
-if [[ $mode == verify ]]; then
-    verify_inputs
-    exit
-fi
+if [[ $mode == verify ]]; then verify_inputs; exit; fi
 if [[ $mode == self-test ]]; then
-    temp_dir=$(mktemp -d)
-    trap 'rm -rf "$temp_dir"' EXIT
-    self_test
-    exit
+    temp_dir=$(mktemp -d); trap 'rm -rf "$temp_dir"' EXIT
+    self_test; exit
 fi
 
-[[ $case_id == chip8-logo ]] || { printf 'unknown case: %s\n' "$case_id" >&2; exit 2; }
+verify_inputs
 mkdir -p "$(dirname -- "$output")"
 : >"$output"
 temp_dir=$(mktemp -d)
 trap 'rm -rf "$temp_dir"' EXIT
 suite=$temp_dir/suite
-rom=$suite/bin/1-chip8-logo.ch8
-capture=$temp_dir/frame.bmp
-expected_rom_hash=15f7fb887ea4cb8e40615bb20b0cfd993ef55ca84c535c8c8f3fafa8bf129724
-# Upstream's documented 39-cycle CHIP-8 logo, decoded to 64x32 row-major bits.
-expected_frame_hash=2a73bb554cfb8b2a5eb96c8a706faca5799c0fb9b031a786f966895848e308e8
-
-record() {
-    local status=$1 observed=${2:-} message=${3:-}
-    printf '{"case":"%s","checkpoint":"upstream-39-cycles","revision":"%s","profile":"classic","expected":"%s","observed":"%s","status":"%s","message":"%s"}\n' \
-        "$case_id" "$suite_commit" "$expected_frame_hash" "$observed" "$status" "$message" >>"$output"
-}
-
-fail_case() {
-    record fail "${2:-}" "$1"
-    printf 'FAIL %s: %s\n' "$case_id" "$1" >&2
-    exit 1
-}
-
+suite_url=https://github.com/Timendus/chip8-test-suite.git
+suite_commit=$(sed -n '1s/.*suite_commit=\([^[:space:]]*\).*/\1/p' "$manifest")
 git init -q "$suite"
 git -C "$suite" fetch -q --depth 1 "$suite_url" "$suite_commit"
 git -C "$suite" checkout -q --detach FETCH_HEAD
-verify_checkout "$suite" "$suite_commit" || fail_case 'suite revision mismatch'
-verify_rom "$rom" "$expected_rom_hash" || fail_case 'ROM SHA-256 mismatch'
-
+verify_checkout "$suite" "$suite_commit" || exit 1
 cargo build --locked --quiet
-env SDL_VIDEODRIVER=dummy SDL_AUDIODRIVER=dummy target/debug/chiki8 \
-    --file "$rom" --profile classic --cycles 39 --color 255,255,255 \
-    --background 0,0,0 --capture-frame "$capture" >"$temp_dir/emulator.log" 2>&1 || {
-        cat "$temp_dir/emulator.log" >&2
-        fail_case 'emulator exited unsuccessfully'
-    }
 
-# Normalize the 15x-scaled RGB24 BMP to one ASCII bit per logical 64x32 pixel.
-pixel_offset=$(od -An -tu4 -j10 -N4 "$capture" | tr -d ' ')
-observed=$(od -An -v -tu1 -j"$pixel_offset" "$capture" | awk '
-    { for (i = 1; i <= NF; i++) bytes[count++] = $i }
-    END {
-        for (y = 0; y < 32; y++) {
-            source_y = (31 - y) * 15;
-            for (x = 0; x < 64; x++) {
-                pos = (source_y * 960 + x * 15) * 3;
-                printf "%d", bytes[pos] == 255;
+normalize_frame() {
+    local bmp=$1 dimensions=$2 width height sample_x sample_y pixel_offset
+    width=${dimensions%x*}; height=${dimensions#*x}
+    sample_x=$((128 / width)); sample_y=$((64 / height))
+    pixel_offset=$(od -An -tu4 -j10 -N4 "$bmp" | tr -d ' ')
+    od -An -v -tu1 -j"$pixel_offset" "$bmp" | awk -v width="$width" -v height="$height" -v sx="$sample_x" -v sy="$sample_y" '
+        { for (i = 1; i <= NF; i++) bytes[count++] = $i }
+        END {
+            for (y = 0; y < height; y++) {
+                source_y = 63 - y * sy;
+                for (x = 0; x < width; x++) {
+                    pos = (source_y * 128 + x * sx) * 3;
+                    printf "%d", bytes[pos] == 255;
+                }
             }
         }
-    }
-' | sha256sum | cut -d ' ' -f 1)
+    ' | sha256sum | cut -d ' ' -f 1
+}
 
-[[ $observed == "$expected_frame_hash" ]] || fail_case 'framebuffer SHA-256 mismatch' "$observed"
-record pass "$observed"
+failures=0
+selected=0
+while IFS=$'\t' read -r case_id source commit rom_path rom_hash license license_file author profile selector schedule checkpoint purpose classification dimensions expected; do
+    [[ $case_id == case_id || $case_id == \#* || -z $case_id ]] && continue
+    [[ -z $requested_case || $requested_case == "$case_id" ]] || continue
+    selected=$((selected + 1))
+    rom=$suite/$rom_path
+    capture=$temp_dir/$case_id.bmp
+    observed=
+    status=pass
+    message=
+    preparation=none
+    if ! verify_rom "$rom" "$rom_hash" 2>"$temp_dir/error"; then
+        status=fail; message='ROM SHA-256 mismatch'
+    else
+        cycles=${schedule#cycles:}
+        args=(--file "$rom" --profile "$profile" --cycles "$cycles" --speed 1000 --scale 2 --color 255,255,255 --background 0,0,0 --capture-frame "$capture")
+        if [[ $selector != none ]]; then
+            selector_value=${selector#*=}; args+=(--suite-selector "$selector_value"); preparation=$selector
+        fi
+        if ! env SDL_VIDEODRIVER=dummy SDL_AUDIODRIVER=dummy target/debug/chiki8 "${args[@]}" >"$temp_dir/emulator.log" 2>&1; then
+            status=fail; message='emulator exited unsuccessfully'
+        else
+            observed=$(normalize_frame "$capture" "$dimensions")
+            if [[ $expected != discover && $observed != "$expected" ]]; then status=fail; message='framebuffer SHA-256 mismatch'; fi
+        fi
+    fi
+    printf '{"case":"%s","checkpoint":"%s","revision":"%s","rom_sha256":"%s","profile":"%s","schedule":"%s","selector":"%s","preparation":"%s","expected":"%s","observed":"%s","status":"%s","message":"%s"}\n' \
+        "$case_id" "$checkpoint" "$commit" "$rom_hash" "$profile" "$schedule" "$selector" "$preparation" "$expected" "$observed" "$status" "$message" >>"$output"
+    if [[ $status == fail ]]; then failures=$((failures + 1)); printf 'FAIL %s: %s\n' "$case_id" "$message" >&2; fi
+done <"$manifest"
+
+((selected > 0)) || { printf 'no manifest case selected\n' >&2; exit 2; }
+((failures == 0))

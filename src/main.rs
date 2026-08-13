@@ -669,6 +669,17 @@ fn run() -> Result<(), String> {
                         if outcome == StepOutcome::Unsupported {
                             eprintln!("Unsupported opcode");
                         }
+                        if outcome == StepOutcome::Halted {
+                            if let Some(path) = capture_path.as_deref() {
+                                renderer.draw(
+                                    &mut canvas,
+                                    &cpu,
+                                    &background_color,
+                                    &foreground_color,
+                                )?;
+                                capture_canvas(&mut canvas, path)?;
+                            }
+                        }
                         break 'emuloop;
                     }
                     executed += 1;

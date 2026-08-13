@@ -56,3 +56,41 @@ fn bounded_run_preserves_cpu_stop_outcomes() {
         assert!(output.status.success(), "{:?}", output.status);
     }
 }
+
+#[test]
+fn capture_frame_requires_a_bounded_run() {
+    let output = Command::new(env!("CARGO_BIN_EXE_chiki8"))
+        .args(["--capture-frame", "/tmp/chiki8-unused.bmp"])
+        .env("SDL_VIDEODRIVER", "chiki8-invalid-driver")
+        .output()
+        .expect("run chiki8");
+    assert_eq!(output.status.code(), Some(2));
+    assert!(String::from_utf8_lossy(&output.stderr).contains("capture-frame"));
+}
+
+#[test]
+fn capture_frame_writes_the_final_production_canvas() {
+    let capture = temp_path("frame.bmp");
+    let output = run_rom(
+        &[0x60, 0x00, 0x61, 0x00, 0xa0, 0x00, 0xd0, 0x15, 0x12, 0x08],
+        &["--frames", "2", "--capture-frame", capture.to_str().unwrap()],
+    );
+    assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+    let bmp = fs::read(&capture).expect("read captured BMP");
+    assert!(bmp.len() > 54);
+    assert_eq!(&bmp[..2], b"BM");
+    fs::remove_file(capture).unwrap();
+}
+
+#[test]
+fn capture_frame_names_an_unwritable_destination() {
+    let destination = temp_path("directory");
+    fs::create_dir(&destination).unwrap();
+    let output = run_rom(
+        &[0x12, 0x00],
+        &["--frames", "1", "--capture-frame", destination.to_str().unwrap()],
+    );
+    assert!(!output.status.success());
+    assert!(String::from_utf8_lossy(&output.stderr).contains(destination.to_str().unwrap()));
+    fs::remove_dir(destination).unwrap();
+}

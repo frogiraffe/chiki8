@@ -702,9 +702,10 @@ impl Cpu {
 mod tests {
     use super::*;
 
-    fn assert_unsupported_without_mutation(cpu: &mut Cpu, opcode: u16) {
-        cpu.memory[cpu.pc as usize] = (opcode >> 8) as u8;
-        cpu.memory[cpu.pc as usize + 1] = opcode as u8;
+    fn assert_step_unsupported_without_mutation(
+        cpu: &mut Cpu,
+        step: impl FnOnce(&mut Cpu) -> StepOutcome,
+    ) {
         let pc = cpu.pc;
         let sp = cpu.sp;
         let stack = cpu.stack;
@@ -722,36 +723,31 @@ mod tests {
         let halted = cpu.halted;
         let mut expected_rng = cpu.rng.clone();
 
-        assert_eq!(
-            cpu.decode_opcode(),
-            StepOutcome::Unsupported,
-            "{opcode:04X}"
-        );
-        assert_eq!(cpu.pc, pc, "{opcode:04X}");
-        assert_eq!(cpu.sp, sp, "{opcode:04X}");
-        assert_eq!(cpu.stack, stack, "{opcode:04X}");
-        assert_eq!(cpu.screen, screen, "{opcode:04X}");
-        assert_eq!(cpu.display_mode, display_mode, "{opcode:04X}");
-        assert_eq!(cpu.keys, keys, "{opcode:04X}");
-        assert_eq!(cpu.prev_keys, prev_keys, "{opcode:04X}");
-        assert_eq!(
-            cpu.waiting_for_key_release, waiting_for_key_release,
-            "{opcode:04X}"
-        );
-        assert_eq!(cpu.v, v, "{opcode:04X}");
-        assert_eq!(cpu.i, i, "{opcode:04X}");
-        assert_eq!(cpu.st, st, "{opcode:04X}");
-        assert_eq!(cpu.dt, dt, "{opcode:04X}");
-        assert_eq!(cpu.memory, memory, "{opcode:04X}");
-        assert_eq!(cpu.rpl, rpl, "{opcode:04X}");
-        assert_eq!(cpu.halted, halted, "{opcode:04X}");
+        assert_eq!(step(cpu), StepOutcome::Unsupported);
+        assert_eq!(cpu.pc, pc);
+        assert_eq!(cpu.sp, sp);
+        assert_eq!(cpu.stack, stack);
+        assert_eq!(cpu.screen, screen);
+        assert_eq!(cpu.display_mode, display_mode);
+        assert_eq!(cpu.keys, keys);
+        assert_eq!(cpu.prev_keys, prev_keys);
+        assert_eq!(cpu.waiting_for_key_release, waiting_for_key_release);
+        assert_eq!(cpu.v, v);
+        assert_eq!(cpu.i, i);
+        assert_eq!(cpu.st, st);
+        assert_eq!(cpu.dt, dt);
+        assert_eq!(cpu.memory, memory);
+        assert_eq!(cpu.rpl, rpl);
+        assert_eq!(cpu.halted, halted);
 
         let mut actual_rng = cpu.rng.clone();
-        assert_eq!(
-            actual_rng.gen::<u64>(),
-            expected_rng.gen::<u64>(),
-            "{opcode:04X}"
-        );
+        assert_eq!(actual_rng.gen::<u64>(), expected_rng.gen::<u64>());
+    }
+
+    fn assert_unsupported_without_mutation(cpu: &mut Cpu, opcode: u16) {
+        cpu.memory[cpu.pc as usize] = (opcode >> 8) as u8;
+        cpu.memory[cpu.pc as usize + 1] = opcode as u8;
+        assert_step_unsupported_without_mutation(cpu, Cpu::decode_opcode);
     }
 
     #[test]
@@ -1214,6 +1210,29 @@ mod tests {
         assert_eq!(cpu.execute_opcode(0xD012), StepOutcome::Unsupported);
         assert_eq!(cpu.pc, pc);
         assert_eq!(cpu.screen, pixels);
+    }
+
+    #[test]
+    fn opcode_fetch_boundaries_are_atomic() {
+        let mut cpu = Cpu::with_seed(Profile::Classic, 7);
+        cpu.pc = 0x0FFE;
+        cpu.memory[0x0FFE..=0x0FFF].copy_from_slice(&[0x60, 0x42]);
+        assert_eq!(cpu.tick(), StepOutcome::Executed);
+        assert_eq!(cpu.v[0], 0x42);
+        assert_eq!(cpu.pc, 0x1000);
+
+        cpu.reset();
+        cpu.pc = 0x0FFF;
+        assert_step_unsupported_without_mutation(&mut cpu, |cpu| cpu.execute_opcode(0x6001));
+
+        cpu.reset();
+        assert_eq!(cpu.execute_opcode(0x1FFF), StepOutcome::Executed);
+        assert_step_unsupported_without_mutation(&mut cpu, Cpu::tick);
+
+        cpu.reset();
+        cpu.v[0] = 1;
+        assert_eq!(cpu.execute_opcode(0xBFFF), StepOutcome::Executed);
+        assert_step_unsupported_without_mutation(&mut cpu, Cpu::tick);
     }
 
     #[test]

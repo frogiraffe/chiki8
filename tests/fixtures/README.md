@@ -5,3 +5,6 @@
 The Timendus inputs are classified `test-only-transient`. Release and archive tooling must not include the temporary checkout or fetched ROM bytes. Public documentation media requires a separately approved redistributable source in Phase 07; passing these tests does not authorize treating their captures as public release assets.
 
 The adjacent license copy is the upstream `LICENSE` file at commit `cb24d5595384a80b49ddedae13bec4042b16d41d`.
+
+`vendor/ORACLE-DERIVATION.md` records the independent upstream sources and
+deterministic procedure used to approve framebuffer hashes.

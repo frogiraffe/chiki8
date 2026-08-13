@@ -58,6 +58,7 @@ verify_inputs() {
     ' "$manifest" || return 1
     [[ -f $license_file ]] || { printf 'upstream license copy missing\n' >&2; return 1; }
     [[ $(sha256_file "$license_file") == "$license_sha256" ]] || { printf 'upstream license copy SHA-256 mismatch\n' >&2; return 1; }
+    [[ -f tests/fixtures/vendor/ORACLE-DERIVATION.md ]] || { printf 'oracle derivation record missing\n' >&2; return 1; }
     if git ls-files 'tests/fixtures/vendor/*.ch8' 'tests/fixtures/vendor/**/*.ch8' | grep -q .; then
         printf 'tracked external .ch8 fixture violates transient policy\n' >&2; return 1
     fi

@@ -125,6 +125,21 @@ fn cycle_budget_preserves_cpu_stop_outcomes() {
 }
 
 #[test]
+fn suite_selector_rejects_values_outside_the_documented_range_before_sdl() {
+    for value in ["0", "6", "nope"] {
+        let output = Command::new(env!("CARGO_BIN_EXE_chiki8"))
+            .args(["--suite-selector", value])
+            .env("SDL_VIDEODRIVER", "chiki8-invalid-driver")
+            .output()
+            .expect("run chiki8");
+        assert_eq!(output.status.code(), Some(2));
+        assert!(
+            String::from_utf8_lossy(&output.stderr).contains("expected an integer from 1 through 5")
+        );
+    }
+}
+
+#[test]
 fn capture_frame_requires_a_bounded_run() {
     let output = Command::new(env!("CARGO_BIN_EXE_chiki8"))
         .args(["--capture-frame", "/tmp/chiki8-unused.bmp"])

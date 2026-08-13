@@ -26,7 +26,8 @@ suite=$temp_dir/suite
 rom=$suite/bin/1-chip8-logo.ch8
 capture=$temp_dir/frame.bmp
 expected_rom_hash=15f7fb887ea4cb8e40615bb20b0cfd993ef55ca84c535c8c8f3fafa8bf129724
-expected_frame_hash=0000000000000000000000000000000000000000000000000000000000000000
+# Upstream's documented 39-cycle CHIP-8 logo, decoded to 64x32 row-major bits.
+expected_frame_hash=2a73bb554cfb8b2a5eb96c8a706faca5799c0fb9b031a786f966895848e308e8
 
 record() {
     local status=$1 observed=${2:-} message=${3:-}

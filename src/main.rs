@@ -667,7 +667,7 @@ fn run() -> Result<(), String> {
                     let outcome = cpu.tick();
                     if !step_outcome_controls_loop(outcome) {
                         if outcome == StepOutcome::Unsupported {
-                            eprintln!("Unsupported opcode");
+                            return Err("Unsupported opcode".to_string());
                         }
                         if outcome == StepOutcome::Halted {
                             if let Some(path) = capture_path.as_deref() {

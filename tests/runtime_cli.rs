@@ -118,10 +118,18 @@ fn cycle_budget_rejects_a_simultaneous_frame_budget_before_sdl() {
 
 #[test]
 fn cycle_budget_preserves_cpu_stop_outcomes() {
-    for rom in [[0x00, 0xfd], [0x50, 0x01]] {
-        let output = run_rom(&rom, &["--profile", "superchip-1.1", "--cycles", "20"]);
-        assert!(output.status.success(), "{:?}", output.status);
-    }
+    let halted = run_rom(
+        &[0x00, 0xfd],
+        &["--profile", "superchip-1.1", "--cycles", "20"],
+    );
+    assert!(halted.status.success(), "{:?}", halted.status);
+
+    let unsupported = run_rom(
+        &[0x50, 0x01],
+        &["--profile", "superchip-1.1", "--cycles", "20"],
+    );
+    assert_eq!(unsupported.status.code(), Some(1));
+    assert!(String::from_utf8_lossy(&unsupported.stderr).contains("Unsupported opcode"));
 }
 
 #[test]

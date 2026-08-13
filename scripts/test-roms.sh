@@ -114,6 +114,11 @@ normalize_frame() {
     ' | sha256sum | cut -d ' ' -f 1
 }
 
+observe_capture() {
+    [[ -r $1 ]] || { printf 'capture missing: %s\n' "$1" >&2; return 1; }
+    normalize_frame "$1" "$2"
+}
+
 failures=0
 selected=0
 while IFS=$'\t' read -r case_id source commit rom_path rom_hash license license_file author profile selector schedule checkpoint purpose classification dimensions expected; do
@@ -136,8 +141,9 @@ while IFS=$'\t' read -r case_id source commit rom_path rom_hash license license_
         fi
         if ! env SDL_VIDEODRIVER=dummy SDL_AUDIODRIVER=dummy target/debug/chiki8 "${args[@]}" >"$temp_dir/emulator.log" 2>&1; then
             status=fail; message='emulator exited unsuccessfully'
+        elif ! observed=$(observe_capture "$capture" "$dimensions"); then
+            status=fail; message='capture missing or unreadable'
         else
-            observed=$(normalize_frame "$capture" "$dimensions")
             if [[ $expected != discover && $observed != "$expected" ]]; then status=fail; message='framebuffer SHA-256 mismatch'; fi
         fi
     fi

@@ -655,6 +655,129 @@ mod tests {
     }
 
     #[test]
+    fn superchip_display_low_mode_uses_physical_pixels_and_preserves_them_across_modes() {
+        let mut cpu = Cpu::with_seed(Profile::SuperChip11, 7);
+        assert_eq!(cpu.active_dimensions(), (64, 32));
+        assert_eq!(cpu.get_display().len(), 128 * 64);
+
+        cpu.i = 0x300;
+        cpu.memory[0x300] = 0x80;
+        assert_eq!(cpu.execute_opcode(0xD011), StepOutcome::Executed);
+        for (x, y) in [(0, 0), (1, 0), (0, 1), (1, 1)] {
+            assert!(cpu.screen[x + y * 128]);
+        }
+
+        let pixels = cpu.screen;
+        assert_eq!(cpu.execute_opcode(0x00FF), StepOutcome::Executed);
+        assert_eq!(cpu.active_dimensions(), (128, 64));
+        assert_eq!(cpu.screen, pixels);
+        assert_eq!(cpu.execute_opcode(0x00FE), StepOutcome::Executed);
+        assert_eq!(cpu.active_dimensions(), (64, 32));
+        assert_eq!(cpu.screen, pixels);
+    }
+
+    #[test]
+    fn superchip_display_scrolls_physical_rows_and_columns_with_vacated_strips() {
+        let mut cpu = Cpu::with_seed(Profile::SuperChip11, 7);
+        cpu.screen[0] = true;
+        cpu.screen[127] = true;
+        cpu.screen[128] = true;
+
+        assert_eq!(cpu.execute_opcode(0x00C1), StepOutcome::Executed);
+        assert!(!cpu.screen[..128].iter().any(|pixel| *pixel));
+        assert!(cpu.screen[128]);
+        assert!(cpu.screen[255]);
+        assert!(cpu.screen[256]);
+
+        cpu.screen = [false; 128 * 64];
+        cpu.screen[0] = true;
+        assert_eq!(cpu.execute_opcode(0x00CF), StepOutcome::Executed);
+        assert!(cpu.screen[15 * 128]);
+        assert!(!cpu.screen[..15 * 128].iter().any(|pixel| *pixel));
+
+        cpu.screen = [false; 128 * 64];
+        cpu.screen[0] = true;
+        cpu.screen[127] = true;
+        assert_eq!(cpu.execute_opcode(0x00FB), StepOutcome::Executed);
+        assert!(cpu.screen[4]);
+        assert!(!cpu.screen[..4].iter().any(|pixel| *pixel));
+        assert_eq!(cpu.execute_opcode(0x00FC), StepOutcome::Executed);
+        assert!(cpu.screen[0]);
+        assert!(!cpu.screen[124..128].iter().any(|pixel| *pixel));
+    }
+
+    #[test]
+    fn superchip_display_clips_edges_and_counts_affected_high_resolution_rows() {
+        let mut cpu = Cpu::with_seed(Profile::SuperChip11, 7);
+        cpu.i = 0x300;
+        cpu.memory[0x300..0x302].copy_from_slice(&[0xFF, 0x80]);
+        cpu.v[0] = 63;
+        cpu.v[1] = 31;
+        assert_eq!(cpu.execute_opcode(0xD012), StepOutcome::Executed);
+        assert!(cpu.screen[126 + 62 * 128]);
+        assert!(cpu.screen[127 + 63 * 128]);
+        assert!(!cpu.screen[62 * 128]);
+
+        assert_eq!(cpu.execute_opcode(0x00FF), StepOutcome::Executed);
+        cpu.screen = [false; 128 * 64];
+        cpu.i = 0x300;
+        cpu.memory[0x300..0x320].fill(0);
+        cpu.memory[0x300..0x304].copy_from_slice(&[0x80, 0x01, 0x80, 0x00]);
+        cpu.v[0] = 127;
+        cpu.v[1] = 63;
+        assert_eq!(cpu.execute_opcode(0xD010), StepOutcome::Executed);
+        assert!(cpu.screen[127 + 63 * 128]);
+        assert_eq!(cpu.v[0xF], 15);
+
+        cpu.v[1] = 62;
+        assert_eq!(cpu.execute_opcode(0xD010), StepOutcome::Executed);
+        assert_eq!(cpu.v[0xF], 15);
+    }
+
+    #[test]
+    fn superchip_display_rejects_profile_and_sprite_boundaries_before_mutation() {
+        for opcode in [0x00C1, 0x00CF, 0x00FB, 0x00FC, 0x00FE, 0x00FF, 0xD010] {
+            let mut cpu = Cpu::with_seed(Profile::Classic, 7);
+            cpu.memory[cpu.pc as usize] = (opcode >> 8) as u8;
+            cpu.memory[cpu.pc as usize + 1] = opcode as u8;
+            cpu.screen[63 + 31 * 128] = true;
+            let pc = cpu.pc;
+            let screen = cpu.screen;
+
+            assert_eq!(cpu.decode_opcode(), StepOutcome::Unsupported, "{opcode:04X}");
+            assert_eq!(cpu.pc, pc, "{opcode:04X}");
+            assert_eq!(cpu.screen, screen, "{opcode:04X}");
+        }
+
+        let mut classic = Cpu::with_seed(Profile::Classic, 7);
+        classic.i = 0x300;
+        classic.memory[0x300] = 0x81;
+        classic.v[0] = 63;
+        classic.v[1] = 31;
+        assert_eq!(classic.execute_opcode(0xD011), StepOutcome::Executed);
+        assert!(classic.screen[63 + 31 * 128]);
+        assert!(classic.screen[6 + 31 * 128]);
+
+        for (opcode, i) in [(0xD012, 4095), (0xD010, 4095)] {
+            let mut cpu = Cpu::with_seed(Profile::SuperChip11, 7);
+            if opcode == 0xD010 {
+                assert_eq!(cpu.execute_opcode(0x00FF), StepOutcome::Executed);
+            }
+            cpu.i = i;
+            cpu.memory[cpu.pc as usize] = (opcode >> 8) as u8;
+            cpu.memory[cpu.pc as usize + 1] = opcode as u8;
+            let pc = cpu.pc;
+            let screen = cpu.screen;
+            let vf = cpu.v[0xF];
+
+            assert_eq!(cpu.decode_opcode(), StepOutcome::Unsupported);
+            assert_eq!(cpu.pc, pc);
+            assert_eq!(cpu.screen, screen);
+            assert_eq!(cpu.v[0xF], vf);
+        }
+    }
+
+    #[test]
     fn profile_parser_accepts_only_classic() {
         assert_eq!("classic".parse::<Profile>(), Ok(Profile::Classic));
         assert!("Classic".parse::<Profile>().is_err());

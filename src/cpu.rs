@@ -27,14 +27,13 @@ const FONTSET: [u8; 80] = [
 const HIGH_FONT_BASE: usize = FONTSET.len();
 const HIGH_FONT_HEIGHT: usize = 10;
 const HIGH_FONTSET: [u8; 100] = [
-    0x3C, 0x7E, 0xE7, 0xC3, 0xC3, 0xC3, 0xC3, 0xE7, 0x7E, 0x3C, 0x18, 0x38, 0x58, 0x18,
-    0x18, 0x18, 0x18, 0x18, 0x18, 0x3C, 0x3E, 0x7F, 0xC3, 0x06, 0x0C, 0x18, 0x30, 0x60,
-    0xFF, 0xFF, 0x3C, 0x7E, 0xC3, 0x03, 0x0E, 0x0E, 0x03, 0xC3, 0x7E, 0x3C, 0x06, 0x0E,
-    0x1E, 0x36, 0x66, 0xC6, 0xFF, 0xFF, 0x06, 0x06, 0xFF, 0xFF, 0xC0, 0xC0, 0xFC, 0xFE,
-    0x03, 0xC3, 0x7E, 0x3C, 0x3E, 0x7C, 0xE0, 0xC0, 0xFC, 0xFE, 0xC3, 0xC3, 0x7E, 0x3C,
-    0xFF, 0xFF, 0x03, 0x06, 0x0C, 0x18, 0x30, 0x60, 0x60, 0x60, 0x3C, 0x7E, 0xC3, 0xC3,
-    0x7E, 0x7E, 0xC3, 0xC3, 0x7E, 0x3C, 0x3C, 0x7E, 0xC3, 0xC3, 0x7F, 0x3F, 0x03, 0x03,
-    0x3E, 0x7C,
+    0x3C, 0x7E, 0xE7, 0xC3, 0xC3, 0xC3, 0xC3, 0xE7, 0x7E, 0x3C, 0x18, 0x38, 0x58, 0x18, 0x18, 0x18,
+    0x18, 0x18, 0x18, 0x3C, 0x3E, 0x7F, 0xC3, 0x06, 0x0C, 0x18, 0x30, 0x60, 0xFF, 0xFF, 0x3C, 0x7E,
+    0xC3, 0x03, 0x0E, 0x0E, 0x03, 0xC3, 0x7E, 0x3C, 0x06, 0x0E, 0x1E, 0x36, 0x66, 0xC6, 0xFF, 0xFF,
+    0x06, 0x06, 0xFF, 0xFF, 0xC0, 0xC0, 0xFC, 0xFE, 0x03, 0xC3, 0x7E, 0x3C, 0x3E, 0x7C, 0xE0, 0xC0,
+    0xFC, 0xFE, 0xC3, 0xC3, 0x7E, 0x3C, 0xFF, 0xFF, 0x03, 0x06, 0x0C, 0x18, 0x30, 0x60, 0x60, 0x60,
+    0x3C, 0x7E, 0xC3, 0xC3, 0x7E, 0x7E, 0xC3, 0xC3, 0x7E, 0x3C, 0x3C, 0x7E, 0xC3, 0xC3, 0x7F, 0x3F,
+    0x03, 0x03, 0x3E, 0x7C,
 ];
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -691,6 +690,58 @@ impl Cpu {
 mod tests {
     use super::*;
 
+    fn assert_unsupported_without_mutation(cpu: &mut Cpu, opcode: u16) {
+        cpu.memory[cpu.pc as usize] = (opcode >> 8) as u8;
+        cpu.memory[cpu.pc as usize + 1] = opcode as u8;
+        let pc = cpu.pc;
+        let sp = cpu.sp;
+        let stack = cpu.stack;
+        let screen = cpu.screen;
+        let display_mode = cpu.display_mode;
+        let keys = cpu.keys;
+        let prev_keys = cpu.prev_keys;
+        let waiting_for_key_release = cpu.waiting_for_key_release;
+        let v = cpu.v;
+        let i = cpu.i;
+        let st = cpu.st;
+        let dt = cpu.dt;
+        let memory = cpu.memory;
+        let rpl = cpu.rpl;
+        let halted = cpu.halted;
+        let mut expected_rng = cpu.rng.clone();
+
+        assert_eq!(
+            cpu.decode_opcode(),
+            StepOutcome::Unsupported,
+            "{opcode:04X}"
+        );
+        assert_eq!(cpu.pc, pc, "{opcode:04X}");
+        assert_eq!(cpu.sp, sp, "{opcode:04X}");
+        assert_eq!(cpu.stack, stack, "{opcode:04X}");
+        assert_eq!(cpu.screen, screen, "{opcode:04X}");
+        assert_eq!(cpu.display_mode, display_mode, "{opcode:04X}");
+        assert_eq!(cpu.keys, keys, "{opcode:04X}");
+        assert_eq!(cpu.prev_keys, prev_keys, "{opcode:04X}");
+        assert_eq!(
+            cpu.waiting_for_key_release, waiting_for_key_release,
+            "{opcode:04X}"
+        );
+        assert_eq!(cpu.v, v, "{opcode:04X}");
+        assert_eq!(cpu.i, i, "{opcode:04X}");
+        assert_eq!(cpu.st, st, "{opcode:04X}");
+        assert_eq!(cpu.dt, dt, "{opcode:04X}");
+        assert_eq!(cpu.memory, memory, "{opcode:04X}");
+        assert_eq!(cpu.rpl, rpl, "{opcode:04X}");
+        assert_eq!(cpu.halted, halted, "{opcode:04X}");
+
+        let mut actual_rng = cpu.rng.clone();
+        assert_eq!(
+            actual_rng.gen::<u64>(),
+            expected_rng.gen::<u64>(),
+            "{opcode:04X}"
+        );
+    }
+
     #[test]
     fn superchip_profile_outcome_contract() {
         assert_eq!("superchip-1.1".parse::<Profile>(), Ok(Profile::SuperChip11));
@@ -701,7 +752,7 @@ mod tests {
         assert_eq!(cpu.execute_opcode(0x6001), StepOutcome::Executed);
         assert_eq!(cpu.v[0], 1);
 
-        fn assert_unsupported_without_mutation(profile: Profile, opcode: u16) {
+        fn assert_profile_unsupported_without_mutation(profile: Profile, opcode: u16) {
             let mut cpu = Cpu::with_seed(profile, 7);
             cpu.pc = 0x300;
             cpu.sp = 1;
@@ -756,8 +807,8 @@ mod tests {
             assert_eq!(actual_rng.gen::<u64>(), expected_rng.gen::<u64>());
         }
 
-        assert_unsupported_without_mutation(Profile::Classic, 0x00FD);
-        assert_unsupported_without_mutation(Profile::SuperChip11, 0x5011);
+        assert_profile_unsupported_without_mutation(Profile::Classic, 0x00FD);
+        assert_profile_unsupported_without_mutation(Profile::SuperChip11, 0x5011);
 
         let mut cpu = Cpu::with_seed(Profile::SuperChip11, 7);
         assert_eq!(cpu.execute_opcode(0x00FD), StepOutcome::Halted);
@@ -905,7 +956,11 @@ mod tests {
             let pc = cpu.pc;
             let screen = cpu.screen;
 
-            assert_eq!(cpu.decode_opcode(), StepOutcome::Unsupported, "{opcode:04X}");
+            assert_eq!(
+                cpu.decode_opcode(),
+                StepOutcome::Unsupported,
+                "{opcode:04X}"
+            );
             assert_eq!(cpu.pc, pc, "{opcode:04X}");
             assert_eq!(cpu.screen, screen, "{opcode:04X}");
         }
@@ -1041,7 +1096,10 @@ mod tests {
         assert_eq!(cpu.rng.gen::<u64>(), expected_rng.gen::<u64>());
         cpu.reset();
         assert_eq!(cpu.profile, Profile::SuperChip11);
-        assert_eq!(cpu.memory[HIGH_FONT_BASE..HIGH_FONT_BASE + HIGH_FONTSET.len()], HIGH_FONTSET);
+        assert_eq!(
+            cpu.memory[HIGH_FONT_BASE..HIGH_FONT_BASE + HIGH_FONTSET.len()],
+            HIGH_FONTSET
+        );
         assert!(cpu.screen.iter().all(|pixel| !pixel));
         assert_eq!(cpu.rpl, [0; 8]);
     }
@@ -1053,7 +1111,10 @@ mod tests {
         cpu.v[1] = 0b1000_0011;
         cpu.v[2] = 0b0100_0000;
         cpu.execute_opcode(0x8126);
-        assert_eq!((cpu.v[1], cpu.v[2], cpu.v[0xF]), (0b0100_0001, 0b0100_0000, 1));
+        assert_eq!(
+            (cpu.v[1], cpu.v[2], cpu.v[0xF]),
+            (0b0100_0001, 0b0100_0000, 1)
+        );
 
         cpu.i = 0x300;
         cpu.v[..=2].copy_from_slice(&[1, 2, 3]);
@@ -1100,7 +1161,11 @@ mod tests {
             let rpl = cpu.rpl;
             let screen = cpu.screen;
 
-            assert_eq!(cpu.decode_opcode(), StepOutcome::Unsupported, "{opcode:04X}");
+            assert_eq!(
+                cpu.decode_opcode(),
+                StepOutcome::Unsupported,
+                "{opcode:04X}"
+            );
             assert_eq!(cpu.pc, pc, "{opcode:04X}");
             assert_eq!(cpu.v, registers, "{opcode:04X}");
             assert_eq!(cpu.i, i, "{opcode:04X}");
@@ -1137,6 +1202,244 @@ mod tests {
         assert_eq!(cpu.execute_opcode(0xD012), StepOutcome::Unsupported);
         assert_eq!(cpu.pc, pc);
         assert_eq!(cpu.screen, pixels);
+    }
+
+    #[test]
+    fn profile_opcode_matrix() {
+        let common = [
+            ("00E0", 0x00E0),
+            ("00EE", 0x00EE),
+            ("1NNN", 0x1345),
+            ("2NNN", 0x2345),
+            ("3XKK", 0x3142),
+            ("4XKK", 0x4142),
+            ("5XY0", 0x5120),
+            ("6XKK", 0x6142),
+            ("7XKK", 0x7142),
+            ("8XY0", 0x8120),
+            ("8XY1", 0x8121),
+            ("8XY2", 0x8122),
+            ("8XY3", 0x8123),
+            ("8XY4", 0x8124),
+            ("8XY5", 0x8125),
+            ("8XY6", 0x8126),
+            ("8XY7", 0x8127),
+            ("8XYE", 0x812E),
+            ("9XY0", 0x9120),
+            ("ANNN", 0xA345),
+            ("BNNN/BXNN", 0xB123),
+            ("CXKK", 0xC100),
+            ("DXYN", 0xD011),
+            ("EX9E", 0xE19E),
+            ("EXA1", 0xE1A1),
+            ("FX07", 0xF107),
+            ("FX0A", 0xF10A),
+            ("FX15", 0xF115),
+            ("FX18", 0xF118),
+            ("FX1E", 0xF11E),
+            ("FX29", 0xF129),
+            ("FX33", 0xF133),
+            ("FX55", 0xF155),
+            ("FX65", 0xF165),
+        ];
+
+        for profile in [Profile::Classic, Profile::SuperChip11] {
+            for (name, opcode) in common {
+                let mut cpu = Cpu::with_seed(profile, 7);
+                match opcode {
+                    0x00E0 => cpu.screen[0] = true,
+                    0x00EE => {
+                        cpu.sp = 1;
+                        cpu.stack[0] = 0x345;
+                    }
+                    0x3142 => cpu.v[1] = 0x42,
+                    0x4142 => cpu.v[1] = 0x41,
+                    0x5120 => cpu.v[1] = cpu.v[2],
+                    0x7142 => cpu.v[1] = 1,
+                    0x8120..=0x8127 | 0x812E => {
+                        cpu.v[1] = 5;
+                        cpu.v[2] = 3;
+                        cpu.v[0xF] = 0xAB;
+                    }
+                    0x9120 => {
+                        cpu.v[1] = 1;
+                        cpu.v[2] = 2;
+                    }
+                    0xB123 => {
+                        cpu.v[0] = 0x10;
+                        cpu.v[1] = 0x40;
+                    }
+                    0xD011 => {
+                        cpu.i = 0x300;
+                        cpu.memory[0x300] = 0x80;
+                    }
+                    0xE19E => {
+                        cpu.v[1] = 0;
+                        cpu.keys[0] = true;
+                    }
+                    0xF107 => cpu.dt = 5,
+                    0xF10A => cpu.waiting_for_key_release = Some(3),
+                    0xF115 | 0xF118 => cpu.v[1] = 5,
+                    0xF11E => {
+                        cpu.i = 0x300;
+                        cpu.v[1] = 5;
+                    }
+                    0xF129 => cpu.v[1] = 0xA,
+                    0xF133 => {
+                        cpu.i = 0x300;
+                        cpu.v[1] = 234;
+                    }
+                    0xF155 => {
+                        cpu.i = 0x300;
+                        cpu.v[..=1].copy_from_slice(&[1, 2]);
+                    }
+                    0xF165 => {
+                        cpu.i = 0x300;
+                        cpu.memory[0x300..=0x301].copy_from_slice(&[1, 2]);
+                    }
+                    _ => {}
+                }
+
+                assert_eq!(
+                    cpu.execute_opcode(opcode),
+                    StepOutcome::Executed,
+                    "{profile:?} {name}"
+                );
+                match opcode {
+                    0x00E0 => assert!(!cpu.screen[0], "{profile:?} {name}"),
+                    0x00EE => assert_eq!(cpu.pc, 0x345, "{profile:?} {name}"),
+                    0x1345 | 0x2345 => assert_eq!(cpu.pc, 0x345, "{profile:?} {name}"),
+                    0x3142 | 0x4142 | 0x5120 | 0x9120 | 0xE19E | 0xE1A1 => {
+                        assert_eq!(cpu.pc, 0x204, "{profile:?} {name}")
+                    }
+                    0x6142 => assert_eq!(cpu.v[1], 0x42, "{profile:?} {name}"),
+                    0x7142 => assert_eq!(cpu.v[1], 0x43, "{profile:?} {name}"),
+                    0x8120 => assert_eq!(cpu.v[1], 3, "{profile:?} {name}"),
+                    0x8121 => assert_eq!(cpu.v[1], 7, "{profile:?} {name}"),
+                    0x8122 => assert_eq!(cpu.v[1], 1, "{profile:?} {name}"),
+                    0x8123 => assert_eq!(cpu.v[1], 6, "{profile:?} {name}"),
+                    0x8124 => assert_eq!(cpu.v[1], 8, "{profile:?} {name}"),
+                    0x8125 => assert_eq!(cpu.v[1], 2, "{profile:?} {name}"),
+                    0x8126 => assert_eq!(cpu.v[1], 2, "{profile:?} {name}"),
+                    0x8127 => assert_eq!(cpu.v[1], 0xFE, "{profile:?} {name}"),
+                    0x812E => assert_eq!(cpu.v[1], 10, "{profile:?} {name}"),
+                    0xA345 => assert_eq!(cpu.i, 0x345, "{profile:?} {name}"),
+                    0xB123 => assert_eq!(
+                        cpu.pc,
+                        if profile == Profile::Classic {
+                            0x133
+                        } else {
+                            0x63
+                        }
+                    ),
+                    0xC100 => assert_eq!(cpu.v[1], 0, "{profile:?} {name}"),
+                    0xD011 => assert!(cpu.screen[0], "{profile:?} {name}"),
+                    0xF107 | 0xF10A => assert_eq!(cpu.v[1], if opcode == 0xF107 { 5 } else { 3 }),
+                    0xF115 => assert_eq!(cpu.dt, 5, "{profile:?} {name}"),
+                    0xF118 => assert_eq!(cpu.st, 5, "{profile:?} {name}"),
+                    0xF11E => assert_eq!(cpu.i, 0x305, "{profile:?} {name}"),
+                    0xF129 => assert_eq!(cpu.i, 50, "{profile:?} {name}"),
+                    0xF133 => assert_eq!(&cpu.memory[0x300..=0x302], &[2, 3, 4]),
+                    0xF155 => assert_eq!(&cpu.memory[0x300..=0x301], &[1, 2]),
+                    0xF165 => assert_eq!(&cpu.v[..=1], &[1, 2]),
+                    _ => {}
+                }
+            }
+        }
+
+        for opcode in 0x00C1..=0x00CF {
+            let mut superchip = Cpu::with_seed(Profile::SuperChip11, 7);
+            superchip.screen[0] = true;
+            assert_eq!(
+                superchip.execute_opcode(opcode),
+                StepOutcome::Executed,
+                "{opcode:04X}"
+            );
+            assert!(superchip.screen[(opcode & 0xF) as usize * PHYSICAL_SCREEN_WIDTH]);
+            assert_unsupported_without_mutation(&mut Cpu::with_seed(Profile::Classic, 7), opcode);
+        }
+
+        for opcode in [
+            0x00FB, 0x00FC, 0x00FE, 0x00FF, 0xD010, 0xF130, 0xF175, 0xF185,
+        ] {
+            let mut superchip = Cpu::with_seed(Profile::SuperChip11, 7);
+            superchip.i = 0x300;
+            superchip.v[1] = 1;
+            if opcode == 0xD010 {
+                superchip.display_mode = DisplayMode::High;
+            }
+            assert_eq!(
+                superchip.execute_opcode(opcode),
+                StepOutcome::Executed,
+                "{opcode:04X}"
+            );
+            assert_unsupported_without_mutation(&mut Cpu::with_seed(Profile::Classic, 7), opcode);
+        }
+
+        let mut halted = Cpu::with_seed(Profile::SuperChip11, 7);
+        assert_eq!(halted.execute_opcode(0x00FD), StepOutcome::Halted);
+        assert_unsupported_without_mutation(&mut Cpu::with_seed(Profile::Classic, 7), 0x00FD);
+
+        for opcode in [
+            0x00C0, 0x5011, 0x8128, 0x9121, 0xE1FF, 0xF1FF, 0xD010, 0x00D1, 0x00B1,
+        ] {
+            assert_unsupported_without_mutation(
+                &mut Cpu::with_seed(Profile::SuperChip11, 7),
+                opcode,
+            );
+        }
+        for (opcode, value) in [
+            (0xF130, 10),
+            (0xFF30, 15),
+            (0xF875, 0),
+            (0xFF75, 0),
+            (0xF885, 0),
+            (0xFF85, 0),
+        ] {
+            let mut cpu = Cpu::with_seed(Profile::SuperChip11, 7);
+            cpu.v[((opcode & 0x0F00) >> 8) as usize] = value;
+            assert_unsupported_without_mutation(&mut cpu, opcode);
+        }
+    }
+
+    #[test]
+    fn exact_stack_memory_key_and_register_boundaries_are_atomic() {
+        let mut cpu = Cpu::with_seed(Profile::SuperChip11, 7);
+        assert_unsupported_without_mutation(&mut cpu, 0x00EE);
+
+        for _ in 0..16 {
+            assert_eq!(cpu.execute_opcode(0x2300), StepOutcome::Executed);
+        }
+        assert_eq!(cpu.sp, 16);
+        assert_unsupported_without_mutation(&mut cpu, 0x2300);
+
+        for (opcode, valid_i, invalid_i) in [
+            (0xF033, 4093, 4094),
+            (0xFF55, 4080, 4081),
+            (0xFF65, 4080, 4081),
+        ] {
+            let mut cpu = Cpu::with_seed(Profile::SuperChip11, 7);
+            cpu.i = valid_i;
+            assert_eq!(
+                cpu.execute_opcode(opcode),
+                StepOutcome::Executed,
+                "{opcode:04X}"
+            );
+            cpu.i = invalid_i;
+            assert_unsupported_without_mutation(&mut cpu, opcode);
+        }
+
+        let mut cpu = Cpu::with_seed(Profile::Classic, 7);
+        cpu.v[0] = 0;
+        cpu.v[0xF] = 0xF;
+        cpu.keypress(0, true);
+        cpu.keypress(0xF, true);
+        assert_eq!(cpu.execute_opcode(0xE09E), StepOutcome::Executed);
+        assert_eq!(cpu.execute_opcode(0xEF9E), StepOutcome::Executed);
+        let keys = cpu.keys;
+        cpu.keypress(16, true);
+        cpu.keypress(255, true);
+        assert_eq!(cpu.keys, keys);
     }
 
     #[test]

@@ -202,8 +202,10 @@ impl Cpu {
         self.decode_opcode()
     }
 
-    fn peek_opcode(&self) -> u16 {
-        (self.memory[self.pc as usize] as u16) << 8 | self.memory[self.pc as usize + 1] as u16
+    fn peek_opcode(&self) -> Option<u16> {
+        let start = self.pc as usize;
+        let bytes = self.memory.get(start..start + 2)?;
+        Some(u16::from_be_bytes([bytes[0], bytes[1]]))
     }
 
     fn supports_opcode(&self, opcode: u16) -> bool {
@@ -266,7 +268,9 @@ impl Cpu {
             return StepOutcome::Halted;
         }
 
-        let opcode = self.peek_opcode();
+        let Some(opcode) = self.peek_opcode() else {
+            return StepOutcome::Unsupported;
+        };
         if !self.supports_opcode(opcode) {
             return StepOutcome::Unsupported;
         }
@@ -667,8 +671,10 @@ impl Cpu {
         if self.halted {
             return StepOutcome::Halted;
         }
-        self.memory[self.pc as usize] = (opcode >> 8) as u8;
-        self.memory[self.pc as usize + 1] = (opcode & 0xFF) as u8;
+        let start = self.pc as usize;
+        if let Some(bytes) = self.memory.get_mut(start..start + 2) {
+            bytes.copy_from_slice(&opcode.to_be_bytes());
+        }
         self.decode_opcode()
     }
 

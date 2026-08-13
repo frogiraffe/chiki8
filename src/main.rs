@@ -76,15 +76,15 @@ fn draw_screen(
         for x in 0..width {
             let pixel = screen_buf[x * backing_scale + y * backing_scale * PHYSICAL_SCREEN_WIDTH];
             if pixel {
-            match canvas.fill_rect(Rect::new(
-                x as i32 * scale as i32,
-                y as i32 * scale as i32,
-                scale,
-                scale,
-            )) {
-                Ok(_) => {}
-                Err(e) => println!("Error: {}", e),
-            }
+                match canvas.fill_rect(Rect::new(
+                    x as i32 * scale as i32,
+                    y as i32 * scale as i32,
+                    scale,
+                    scale,
+                )) {
+                    Ok(_) => {}
+                    Err(e) => println!("Error: {}", e),
+                }
             }
         }
     }

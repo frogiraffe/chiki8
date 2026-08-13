@@ -175,7 +175,7 @@ fn main() {
             Ok(profile) => profile,
             Err(error) => {
                 eprintln!("{error}");
-                return;
+                std::process::exit(2);
             }
         },
         None => Profile::Classic,

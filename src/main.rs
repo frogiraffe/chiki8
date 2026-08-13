@@ -472,7 +472,6 @@ fn run() -> Result<(), String> {
             SCREEN_HEIGHT as u32 * scale,
         )
         .position_centered()
-        .opengl()
         .build()
         .map_err(|error| format!("SDL window creation failed: {error}"))?;
     let mut canvas = window

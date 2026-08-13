@@ -3,6 +3,8 @@ use std::path::Path;
 use std::str::FromStr;
 pub const SCREEN_WIDTH: usize = 64;
 pub const SCREEN_HEIGHT: usize = 32;
+pub const PHYSICAL_SCREEN_WIDTH: usize = 128;
+pub const PHYSICAL_SCREEN_HEIGHT: usize = 64;
 const PROGRAM_START: u16 = 0x200;
 const FONTSET: [u8; 80] = [
     0xF0, 0x90, 0x90, 0x90, 0xF0, // 0
@@ -50,13 +52,20 @@ pub enum StepOutcome {
     Halted,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum DisplayMode {
+    Low,
+    High,
+}
+
 pub struct Cpu {
     profile: Profile,
     pc: u16,
     sp: u8,
     stack: [u16; 16],
 
-    pub screen: [bool; SCREEN_WIDTH * SCREEN_HEIGHT],
+    pub screen: [bool; PHYSICAL_SCREEN_WIDTH * PHYSICAL_SCREEN_HEIGHT],
+    display_mode: DisplayMode,
     keys: [bool; 16],
     prev_keys: [bool; 16],
     waiting_for_key_release: Option<u8>,
@@ -73,8 +82,14 @@ pub struct Cpu {
 }
 
 impl Cpu {
-    pub fn get_display(&self) -> &[bool; SCREEN_WIDTH * SCREEN_HEIGHT] {
+    pub fn get_display(&self) -> &[bool; PHYSICAL_SCREEN_WIDTH * PHYSICAL_SCREEN_HEIGHT] {
         &self.screen
+    }
+    pub fn active_dimensions(&self) -> (usize, usize) {
+        match self.display_mode {
+            DisplayMode::Low => (SCREEN_WIDTH, SCREEN_HEIGHT),
+            DisplayMode::High => (PHYSICAL_SCREEN_WIDTH, PHYSICAL_SCREEN_HEIGHT),
+        }
     }
     pub fn keypress(&mut self, key: usize, pressed: bool) {
         if let (Some(previous), Some(current)) =
@@ -95,7 +110,8 @@ impl Cpu {
             stack: [0; 16],
             sp: 0,
 
-            screen: [false; SCREEN_WIDTH * SCREEN_HEIGHT],
+            screen: [false; PHYSICAL_SCREEN_WIDTH * PHYSICAL_SCREEN_HEIGHT],
+            display_mode: DisplayMode::Low,
             keys: [false; 16],
             prev_keys: [false; 16],
             waiting_for_key_release: None,
@@ -123,7 +139,8 @@ impl Cpu {
         self.pc = PROGRAM_START;
         self.stack = [0; 16];
         self.sp = 0;
-        self.screen = [false; SCREEN_WIDTH * SCREEN_HEIGHT];
+        self.screen = [false; PHYSICAL_SCREEN_WIDTH * PHYSICAL_SCREEN_HEIGHT];
+        self.display_mode = DisplayMode::Low;
         self.keys = [false; 16];
         self.prev_keys = [false; 16];
         self.waiting_for_key_release = None;
@@ -179,10 +196,26 @@ impl Cpu {
         match opcode & 0xF000 {
             0x0000 => match opcode {
                 0x00E0 | 0x00EE => true,
-                0x00FD => self.profile == Profile::SuperChip11,
+                0x00C1..=0x00CF | 0x00FB..=0x00FF => self.profile == Profile::SuperChip11,
                 _ => false,
             },
-            0x1000..=0x4000 | 0x6000 | 0x7000 | 0xA000..=0xD000 => true,
+            0x1000..=0x4000 | 0x6000 | 0x7000 | 0xA000..=0xC000 => true,
+            0xD000 => {
+                let rows = (opcode & 0x000F) as usize;
+                let bytes = if rows == 0 {
+                    if self.profile != Profile::SuperChip11
+                        || self.display_mode != DisplayMode::High
+                    {
+                        return false;
+                    }
+                    32
+                } else {
+                    rows
+                };
+                self.i
+                    .checked_add(bytes)
+                    .is_some_and(|end| end <= self.memory.len())
+            }
             0x5000 | 0x9000 => opcode & 0x000F == 0,
             0x8000 => matches!(opcode & 0x000F, 0x0..=0x7 | 0xE),
             0xE000 => matches!(opcode & 0x00FF, 0x9E | 0xA1),
@@ -209,10 +242,15 @@ impl Cpu {
             0x0000 => match opcode {
                 0x00E0 => self.op_00e0(),
                 0x00EE => self.op_00ee(),
+                0x00C1..=0x00CF => self.op_00cn(opcode),
+                0x00FB => self.op_00fb(),
+                0x00FC => self.op_00fc(),
                 0x00FD => {
                     self.halted = true;
                     return StepOutcome::Halted;
                 }
+                0x00FE => self.display_mode = DisplayMode::Low,
+                0x00FF => self.display_mode = DisplayMode::High,
                 _ => unreachable!(),
             },
             0x1000 => self.op_1nnn(opcode),
@@ -264,7 +302,26 @@ impl Cpu {
     }
 
     fn op_00e0(&mut self) {
-        self.screen = [false; SCREEN_WIDTH * SCREEN_HEIGHT];
+        self.screen = [false; PHYSICAL_SCREEN_WIDTH * PHYSICAL_SCREEN_HEIGHT];
+    }
+    fn op_00cn(&mut self, opcode: u16) {
+        let rows = (opcode & 0x000F) as usize;
+        let shift = rows * PHYSICAL_SCREEN_WIDTH;
+        let retained = self.screen.len() - shift;
+        self.screen.copy_within(..retained, shift);
+        self.screen[..shift].fill(false);
+    }
+    fn op_00fb(&mut self) {
+        for row in self.screen.chunks_exact_mut(PHYSICAL_SCREEN_WIDTH) {
+            row.copy_within(..PHYSICAL_SCREEN_WIDTH - 4, 4);
+            row[..4].fill(false);
+        }
+    }
+    fn op_00fc(&mut self) {
+        for row in self.screen.chunks_exact_mut(PHYSICAL_SCREEN_WIDTH) {
+            row.copy_within(4.., 0);
+            row[PHYSICAL_SCREEN_WIDTH - 4..].fill(false);
+        }
     }
     fn op_00ee(&mut self) {
         self.sp = self.sp.wrapping_sub(1);
@@ -401,33 +458,70 @@ impl Cpu {
         self.v[x] = self.rng.gen::<u8>() & kk;
     }
     fn op_dxyn(&mut self, opcode: u16) {
-        let x = ((opcode & 0x0F00) >> 8) as usize;
-        let y = ((opcode & 0x00F0) >> 4) as usize;
-        let n = opcode & 0x000F;
-        let mut flipped = false;
-        for y_offset in 0..n {
-            let sprite = self.i + y_offset as usize;
-            let pixel = self.memory[sprite];
-            for x_offset in 0..8 {
-                if (pixel & (0x80 >> x_offset)) != 0 {
-                    let (x, y) = match self.profile {
-                        Profile::Classic | Profile::SuperChip11 => (
-                            (self.v[x] as usize + x_offset) % SCREEN_WIDTH,
-                            (self.v[y] as usize + y_offset as usize) % SCREEN_HEIGHT,
-                        ),
-                    };
-                    if self.screen[x + y * SCREEN_WIDTH] {
-                        flipped = true;
+        let x_register = ((opcode & 0x0F00) >> 8) as usize;
+        let y_register = ((opcode & 0x00F0) >> 4) as usize;
+        let rows = (opcode & 0x000F) as usize;
+        if rows == 0 {
+            self.draw_high_sprite(self.v[x_register] as usize, self.v[y_register] as usize);
+            return;
+        }
+
+        let scale = if self.display_mode == DisplayMode::Low {
+            2
+        } else {
+            1
+        };
+        let (width, height) = self.active_dimensions();
+        let mut collided = false;
+        for row in 0..rows {
+            let y = self.v[y_register] as usize + row;
+            for column in 0..8 {
+                if self.memory[self.i + row] & (0x80 >> column) == 0 {
+                    continue;
+                }
+                let x = self.v[x_register] as usize + column;
+                let (x, y) = match self.profile {
+                    Profile::Classic => (x % width, y % height),
+                    Profile::SuperChip11 if x < width && y < height => (x, y),
+                    Profile::SuperChip11 => continue,
+                };
+                for physical_y in y * scale..(y + 1) * scale {
+                    for physical_x in x * scale..(x + 1) * scale {
+                        let index = physical_x + physical_y * PHYSICAL_SCREEN_WIDTH;
+                        collided |= self.screen[index];
+                        self.screen[index] ^= true;
                     }
-                    self.screen[x + y * SCREEN_WIDTH] ^= true;
                 }
             }
         }
-        if flipped {
-            self.v[0xF] = 1;
-        } else {
-            self.v[0xF] = 0;
+        self.v[0xF] = u8::from(collided);
+    }
+
+    fn draw_high_sprite(&mut self, x: usize, y: usize) {
+        let mut affected_rows = 0;
+        for row in 0..16 {
+            let screen_y = y + row;
+            if screen_y >= PHYSICAL_SCREEN_HEIGHT {
+                affected_rows += 1;
+                continue;
+            }
+            let sprite = u16::from_be_bytes([
+                self.memory[self.i + row * 2],
+                self.memory[self.i + row * 2 + 1],
+            ]);
+            let mut collided = false;
+            for column in 0..16 {
+                let screen_x = x + column;
+                if sprite & (0x8000 >> column) == 0 || screen_x >= PHYSICAL_SCREEN_WIDTH {
+                    continue;
+                }
+                let index = screen_x + screen_y * PHYSICAL_SCREEN_WIDTH;
+                collided |= self.screen[index];
+                self.screen[index] ^= true;
+            }
+            affected_rows += u8::from(collided);
         }
+        self.v[0xF] = affected_rows;
     }
     fn op_ex9e(&mut self, opcode: u16) {
         let x = ((opcode & 0x0F00) >> 8) as usize;
@@ -584,6 +678,7 @@ mod tests {
             let sp = cpu.sp;
             let stack = cpu.stack;
             let screen = cpu.screen;
+            let display_mode = cpu.display_mode;
             let keys = cpu.keys;
             let prev_keys = cpu.prev_keys;
             let waiting_for_key_release = cpu.waiting_for_key_release;
@@ -601,6 +696,7 @@ mod tests {
             assert_eq!(cpu.sp, sp);
             assert_eq!(cpu.stack, stack);
             assert_eq!(cpu.screen, screen);
+            assert_eq!(cpu.display_mode, display_mode);
             assert_eq!(cpu.keys, keys);
             assert_eq!(cpu.prev_keys, prev_keys);
             assert_eq!(cpu.waiting_for_key_release, waiting_for_key_release);
@@ -755,8 +851,8 @@ mod tests {
         classic.v[0] = 63;
         classic.v[1] = 31;
         assert_eq!(classic.execute_opcode(0xD011), StepOutcome::Executed);
-        assert!(classic.screen[63 + 31 * 128]);
-        assert!(classic.screen[6 + 31 * 128]);
+        assert!(classic.screen[126 + 62 * 128]);
+        assert!(classic.screen[12 + 62 * 128]);
 
         for (opcode, i) in [(0xD012, 4095), (0xD010, 4095)] {
             let mut cpu = Cpu::with_seed(Profile::SuperChip11, 7);
@@ -845,10 +941,10 @@ mod tests {
             cpu.v[1] = (SCREEN_HEIGHT - 1) as u8;
             cpu.execute_opcode(0xD012);
 
-            assert!(cpu.screen[63 + 31 * SCREEN_WIDTH]);
-            assert!(cpu.screen[31 * SCREEN_WIDTH]);
-            assert!(cpu.screen[6 + 31 * SCREEN_WIDTH]);
-            assert!(cpu.screen[63]);
+            assert!(cpu.screen[126 + 62 * PHYSICAL_SCREEN_WIDTH]);
+            assert!(cpu.screen[62 * PHYSICAL_SCREEN_WIDTH]);
+            assert!(cpu.screen[12 + 62 * PHYSICAL_SCREEN_WIDTH]);
+            assert!(cpu.screen[126]);
         }
 
         type ContractCheck = (&'static str, fn(&mut Cpu));
@@ -874,7 +970,7 @@ mod tests {
     #[test]
     fn test_op_00e0_clear_screen() {
         let mut cpu = Cpu::new(Profile::Classic);
-        cpu.screen = [true; SCREEN_WIDTH * SCREEN_HEIGHT];
+        cpu.screen = [true; PHYSICAL_SCREEN_WIDTH * PHYSICAL_SCREEN_HEIGHT];
         cpu.execute_opcode(0x00E0);
         assert!(cpu.screen.iter().all(|&p| !p));
     }

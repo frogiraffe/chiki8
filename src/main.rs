@@ -65,18 +65,26 @@ fn draw_screen(
     ));
     canvas.clear();
     let screen_buf = cpu.get_display();
+    let (width, height) = cpu.active_dimensions();
+    let backing_scale = PHYSICAL_SCREEN_WIDTH / width;
     canvas.set_draw_color(Color::RGB(
         foreground_color[0],
         foreground_color[1],
         foreground_color[2],
     ));
-    for (i, pixel) in screen_buf.iter().enumerate() {
-        if *pixel {
-            let x = (i % SCREEN_WIDTH) as i32;
-            let y = (i / SCREEN_WIDTH) as i32;
-            match canvas.fill_rect(Rect::new(x * scale as i32, y * scale as i32, scale, scale)) {
+    for y in 0..height {
+        for x in 0..width {
+            let pixel = screen_buf[x * backing_scale + y * backing_scale * PHYSICAL_SCREEN_WIDTH];
+            if pixel {
+            match canvas.fill_rect(Rect::new(
+                x as i32 * scale as i32,
+                y as i32 * scale as i32,
+                scale,
+                scale,
+            )) {
                 Ok(_) => {}
                 Err(e) => println!("Error: {}", e),
+            }
             }
         }
     }

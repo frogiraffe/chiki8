@@ -293,33 +293,28 @@ impl Cpu {
     }
     fn op_8xy6(&mut self, opcode: u16) {
         let x = ((opcode & 0x0F00) >> 8) as usize;
+        let vx = self.v[x];
         match self.profile {
             Profile::Classic => {
-                self.v[0xF] = self.v[x] & 0x1;
-                self.v[x] >>= 1;
+                self.v[x] = vx >> 1;
+                self.v[0xF] = vx & 1;
             }
         }
     }
     fn op_8xy7(&mut self, opcode: u16) {
         let x = ((opcode & 0x0F00) >> 8) as usize;
         let y = ((opcode & 0x00F0) >> 4) as usize;
-        if self.v[x] > self.v[y] {
-            self.v[0xF] = 0;
-        } else {
-            self.v[0xF] = 1;
-        }
-        self.v[x] = self.v[y].wrapping_sub(self.v[x])
+        let (result, borrow) = self.v[y].overflowing_sub(self.v[x]);
+        self.v[x] = result;
+        self.v[0xF] = u8::from(!borrow);
     }
     fn op_8xye(&mut self, opcode: u16) {
         let x = ((opcode & 0x0F00) >> 8) as usize;
+        let vx = self.v[x];
         match self.profile {
             Profile::Classic => {
-                if self.v[x] & 0x80 != 0 {
-                    self.v[0xF] = 1;
-                } else {
-                    self.v[0xF] = 0;
-                }
-                self.v[x] <<= 1;
+                self.v[x] = vx << 1;
+                self.v[0xF] = vx >> 7;
             }
         }
     }
@@ -785,6 +780,29 @@ mod tests {
         cpu.execute_opcode(0x800E);
         assert_eq!(cpu.get_v(0), 0b00000010);
         assert_eq!(cpu.get_v(0xF), 1); // MSB was 1
+    }
+
+    #[test]
+    fn classic_flag_opcodes_snapshot_vf_alias_operand() {
+        let mut cpu = Cpu::new(Profile::Classic);
+        let mut flags = [0; 3];
+
+        cpu.set_v(0xF, 0b0000_0011);
+        cpu.execute_opcode(0x8FF6);
+        flags[0] = cpu.get_v(0xF);
+
+        cpu.reset();
+        cpu.set_v(0, 5);
+        cpu.set_v(0xF, 3);
+        cpu.execute_opcode(0x8F07);
+        flags[1] = cpu.get_v(0xF);
+
+        cpu.reset();
+        cpu.set_v(0xF, 0b1000_0001);
+        cpu.execute_opcode(0x8FFE);
+        flags[2] = cpu.get_v(0xF);
+
+        assert_eq!(flags, [1, 1, 1]);
     }
 
     #[test]

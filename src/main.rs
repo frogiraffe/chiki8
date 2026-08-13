@@ -346,3 +346,15 @@ fn main() {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn step_outcome_controls_loop_contract() {
+        assert!(step_outcome_controls_loop(StepOutcome::Executed));
+        assert!(!step_outcome_controls_loop(StepOutcome::Halted));
+        assert!(!step_outcome_controls_loop(StepOutcome::Unsupported));
+    }
+}

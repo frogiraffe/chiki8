@@ -153,6 +153,7 @@ fn step_outcome_controls_loop(outcome: StepOutcome) -> bool {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum ProfileSource {
     Cli,
+    Toml,
     KnownRom,
     Fallback,
 }
@@ -167,11 +168,21 @@ const TIMENDUS_SCROLLING_SHA256: [u8; 32] = [
     207, 37, 186, 162, 34, 9, 183, 195, 0, 197, 150, 215,
 ];
 
-fn resolve_profile(explicit: Option<Profile>, rom: &[u8]) -> ProfileResolution {
+fn resolve_profile(
+    explicit: Option<Profile>,
+    configured: Option<Profile>,
+    rom: &[u8],
+) -> ProfileResolution {
     if let Some(profile) = explicit {
         return ProfileResolution {
             profile,
             source: ProfileSource::Cli,
+        };
+    }
+    if let Some(profile) = configured {
+        return ProfileResolution {
+            profile,
+            source: ProfileSource::Toml,
         };
     }
     // Timendus CHIP-8 test suite v4.2, commit cb24d5595384a80b49ddedae13bec4042b16d41d,
@@ -203,6 +214,7 @@ fn profile_diagnostic(resolution: &ProfileResolution) -> String {
     let profile = profile_name(resolution.profile);
     match resolution.source {
         ProfileSource::Cli => format!("Profile: {profile} (source: cli)"),
+        ProfileSource::Toml => format!("Profile: {profile} (source: toml)"),
         ProfileSource::KnownRom => format!("Profile: {profile} (source: known-rom)"),
         ProfileSource::Fallback => format!(
             "Profile: {profile} (source: fallback; reason: no explicit profile or known ROM hash match)"
@@ -267,18 +279,10 @@ fn main() {
             }
             Err(e) => {
                 eprintln!("Could not create config file: {}", e);
-                return;
+                std::process::exit(2);
             }
         }
     }
-
-    let config_path = matches
-        .opt_str("config")
-        .unwrap_or_else(|| "chiki8.toml".to_string());
-    let config = Config::load(Path::new(&config_path)).unwrap_or_else(|e| {
-        eprintln!("Could not load config, using defaults: {}", e);
-        Config::default()
-    });
 
     if matches.opt_present("help") {
         print_keymap();
@@ -286,6 +290,19 @@ fn main() {
         println!("{}", opts.usage(""));
         return;
     }
+
+    let explicit_config = matches.opt_str("config");
+    let config_path = explicit_config
+        .clone()
+        .unwrap_or_else(|| "chiki8.toml".to_string());
+    let config = match explicit_config {
+        Some(_) => Config::load_required(Path::new(&config_path)),
+        None => Config::load(Path::new(&config_path)),
+    }
+    .unwrap_or_else(|error| {
+        eprintln!("{error}");
+        std::process::exit(2);
+    });
 
     print_keymap();
 
@@ -303,7 +320,17 @@ fn main() {
             std::process::exit(2);
         }
     };
-    let resolution = resolve_profile(explicit_profile, &rom);
+    let configured_profile = config
+        .emulation
+        .profile
+        .as_deref()
+        .map(str::parse)
+        .transpose()
+        .unwrap_or_else(|error| {
+            eprintln!("Config '{}' field emulation.profile: {error}", config_path);
+            std::process::exit(2);
+        });
+    let resolution = resolve_profile(explicit_profile, configured_profile, &rom);
     let mut cpu = Cpu::new(resolution.profile);
     if let Err(error) = cpu.load_rom(&rom) {
         eprintln!("{error}");

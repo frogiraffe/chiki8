@@ -89,8 +89,16 @@ fn profile_resolution_cli_is_reported_before_sdl() {
 #[test]
 fn profile_resolution_unknown_rom_falls_back_before_sdl() {
     let rom = rom(&[0x00, 0xe0]);
-    let output = run(&["--file", rom.to_str().unwrap()]);
+    let config = rom.with_extension("toml");
+    fs::write(&config, "").unwrap();
+    let output = run(&[
+        "--config",
+        config.to_str().unwrap(),
+        "--file",
+        rom.to_str().unwrap(),
+    ]);
     fs::remove_file(rom).unwrap();
+    fs::remove_file(config).unwrap();
 
     assert!(!output.status.success());
     assert!(String::from_utf8_lossy(&output.stdout).contains(

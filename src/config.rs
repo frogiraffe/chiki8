@@ -249,8 +249,10 @@ impl Config {
         Ok(())
     }
 
-    pub fn get_keycode(&self, key_name: &str) -> Option<usize> {
-        self.keymap.keys.get(key_name).map(|&v| v as usize)
+    pub fn get_keycode(&self, keycode: Keycode) -> Option<usize> {
+        self.keymap.keys.iter().find_map(|(name, &value)| {
+            (Keycode::from_name(name) == Some(keycode)).then_some(value as usize)
+        })
     }
 }
 
@@ -358,6 +360,12 @@ mod tests {
     #[test]
     fn config_validation_accepts_defaults() {
         Config::parse("test.toml", "").unwrap();
+    }
+
+    #[test]
+    fn validated_sdl_key_is_available_to_runtime_dispatch() {
+        let config = Config::parse("test.toml", "[keymap.keys]\nSpace = 1").unwrap();
+        assert_eq!(config.get_keycode(Keycode::Space), Some(1));
     }
 
     #[test]

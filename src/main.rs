@@ -92,48 +92,6 @@ fn draw_screen(
     canvas.present();
 }
 
-fn keycode_to_string(key: Keycode) -> Option<String> {
-    match key {
-        Keycode::Num1 => Some("1".to_string()),
-        Keycode::Num2 => Some("2".to_string()),
-        Keycode::Num3 => Some("3".to_string()),
-        Keycode::Num4 => Some("4".to_string()),
-        Keycode::Num5 => Some("5".to_string()),
-        Keycode::Num6 => Some("6".to_string()),
-        Keycode::Num7 => Some("7".to_string()),
-        Keycode::Num8 => Some("8".to_string()),
-        Keycode::Num9 => Some("9".to_string()),
-        Keycode::Num0 => Some("0".to_string()),
-        Keycode::Q => Some("Q".to_string()),
-        Keycode::W => Some("W".to_string()),
-        Keycode::E => Some("E".to_string()),
-        Keycode::R => Some("R".to_string()),
-        Keycode::T => Some("T".to_string()),
-        Keycode::Y => Some("Y".to_string()),
-        Keycode::U => Some("U".to_string()),
-        Keycode::I => Some("I".to_string()),
-        Keycode::O => Some("O".to_string()),
-        Keycode::P => Some("P".to_string()),
-        Keycode::A => Some("A".to_string()),
-        Keycode::S => Some("S".to_string()),
-        Keycode::D => Some("D".to_string()),
-        Keycode::F => Some("F".to_string()),
-        Keycode::G => Some("G".to_string()),
-        Keycode::H => Some("H".to_string()),
-        Keycode::J => Some("J".to_string()),
-        Keycode::K => Some("K".to_string()),
-        Keycode::L => Some("L".to_string()),
-        Keycode::Z => Some("Z".to_string()),
-        Keycode::X => Some("X".to_string()),
-        Keycode::C => Some("C".to_string()),
-        Keycode::V => Some("V".to_string()),
-        Keycode::B => Some("B".to_string()),
-        Keycode::N => Some("N".to_string()),
-        Keycode::M => Some("M".to_string()),
-        _ => None,
-    }
-}
-
 fn step_outcome_controls_loop(outcome: StepOutcome) -> bool {
     outcome == StepOutcome::Executed
 }
@@ -451,19 +409,15 @@ fn main() {
                     if key == Keycode::Escape {
                         break 'emuloop;
                     }
-                    if let Some(key_str) = keycode_to_string(key) {
-                        if let Some(k) = config.get_keycode(&key_str) {
-                            cpu.keypress(k, true);
-                        }
+                    if let Some(k) = config.get_keycode(key) {
+                        cpu.keypress(k, true);
                     }
                 }
                 Event::KeyUp {
                     keycode: Some(key), ..
                 } => {
-                    if let Some(key_str) = keycode_to_string(key) {
-                        if let Some(k) = config.get_keycode(&key_str) {
-                            cpu.keypress(k, false);
-                        }
+                    if let Some(k) = config.get_keycode(key) {
+                        cpu.keypress(k, false);
                     }
                 }
                 _ => {}

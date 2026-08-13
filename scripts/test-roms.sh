@@ -15,6 +15,11 @@ sha256_file() {
     else shasum -a 256 "$1" | awk '{print $1}'; fi
 }
 
+sha256_stream() {
+    if command -v sha256sum >/dev/null 2>&1; then sha256sum | awk '{print $1}';
+    else shasum -a 256 | awk '{print $1}'; fi
+}
+
 while (($#)); do
     case $1 in
         --case) requested_case=${2:?missing case}; shift 2 ;;
@@ -72,8 +77,7 @@ self_test() {
     local fixture=$temp_dir/manifest.tsv checkout=$temp_dir/checkout
     local mutations=('3s/test-only-transient/release-asset/' '3s/upstream-39-cycles/upstream-"39-cycles/' '4s/^ibm-logo/chip8-logo/' '5s/[0-9a-f]\{64\}/bad-hash/' '6s/cb24d5595384a80b49ddedae13bec4042b16d41d/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/')
     for mutation in "${mutations[@]}"; do
-        cp tests/fixtures/vendor/timendus-chip8-test-suite.tsv "$fixture"
-        sed -i "$mutation" "$fixture"
+        sed "$mutation" tests/fixtures/vendor/timendus-chip8-test-suite.tsv >"$fixture"
         if CHIKI8_MANIFEST=$fixture "$0" --verify-inputs >"$temp_dir/self-test.log" 2>&1; then
             printf 'self-test: malformed manifest unexpectedly passed: %s\n' "$mutation" >&2; return 1
         fi
@@ -122,7 +126,7 @@ normalize_frame() {
                 }
             }
         }
-    ' | sha256sum | cut -d ' ' -f 1
+    ' | sha256_stream
 }
 
 observe_capture() {

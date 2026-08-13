@@ -95,3 +95,14 @@ fn profile_resolution_bad_cli_and_rom_are_status_two() {
     assert_eq!(unreadable.status.code(), Some(2));
     assert!(String::from_utf8_lossy(&unreadable.stderr).contains("Could not read ROM"));
 }
+
+#[test]
+fn rom_preflight_rejects_oversized_rom_before_sdl() {
+    let rom = rom(&vec![0xaa; 4096 - 0x200 + 1]);
+    let output = run(&["--file", rom.to_str().unwrap()]);
+    fs::remove_file(rom).unwrap();
+
+    assert_eq!(output.status.code(), Some(2));
+    assert!(String::from_utf8_lossy(&output.stderr).contains("maximum supported size"));
+    assert!(!String::from_utf8_lossy(&output.stderr).contains("chiki8-invalid-driver"));
+}

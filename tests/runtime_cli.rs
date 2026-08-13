@@ -94,6 +94,10 @@ fn capture_frame_writes_the_final_production_canvas() {
         &[
             "--frames",
             "2",
+            "--background",
+            "1,2,3",
+            "--color",
+            "4,5,6",
             "--capture-frame",
             capture.to_str().unwrap(),
         ],
@@ -106,6 +110,14 @@ fn capture_frame_writes_the_final_production_canvas() {
     let bmp = fs::read(&capture).expect("read captured BMP");
     assert!(bmp.len() > 54);
     assert_eq!(&bmp[..2], b"BM");
+    let u32_at = |offset| u32::from_le_bytes(bmp[offset..offset + 4].try_into().unwrap());
+    let (width, height) = (u32_at(18), u32_at(22));
+    assert_eq!((width, height), (64 * 15, 32 * 15));
+    let pixel_offset = u32_at(10) as usize;
+    let row_stride = (width as usize * 3).div_ceil(4) * 4;
+    let top_row = pixel_offset + (height as usize - 1) * row_stride;
+    assert_eq!(&bmp[top_row..top_row + 3], &[6, 5, 4]);
+    assert_eq!(&bmp[top_row + 60 * 3..top_row + 60 * 3 + 3], &[3, 2, 1]);
     fs::remove_file(capture).unwrap();
 }
 

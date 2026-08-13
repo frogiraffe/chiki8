@@ -136,6 +136,10 @@ fn parse_color(s: &str) -> [u8; 3] {
     ]
 }
 
+fn step_outcome_controls_loop(outcome: StepOutcome) -> bool {
+    outcome == StepOutcome::Executed
+}
+
 fn main() {
     let args: Vec<String> = env::args().collect();
     let mut opts = Options::new();
@@ -321,7 +325,13 @@ fn main() {
         }
 
         for _ in 0..speed {
-            cpu.tick();
+            let outcome = cpu.tick();
+            if !step_outcome_controls_loop(outcome) {
+                if outcome == StepOutcome::Unsupported {
+                    eprintln!("Unsupported opcode");
+                }
+                break 'emuloop;
+            }
         }
 
         draw_screen(

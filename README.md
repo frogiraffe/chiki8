@@ -6,6 +6,8 @@
 
 A configurable desktop CHIP-8 and SUPER-CHIP emulator built with Rust and SDL2.
 
+![chiki8 demo](docs/assets/chiki8-demo.gif)
+
 ## Highlights
 
 - Classic CHIP-8 and SUPER-CHIP 1.1 support
@@ -33,10 +35,6 @@ See [Getting Started](docs/GETTING-STARTED.md) for platform-specific setup instr
    ```bash
    cargo run --release -- -f path/to/game.ch8
    ```
-
-## Gameplay
-
-![chiki8 running demo ROM](docs/assets/chiki8-demo.gif)
 
 ## Usage
 

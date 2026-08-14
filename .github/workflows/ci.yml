@@ -72,7 +72,6 @@ jobs:
           SDL_VIDEODRIVER=dummy SDL_AUDIODRIVER=dummy "$BIN" --file smoke.ch8 --frames 5 --capture-frame smoke.bmp
           test -s smoke.bmp
       - name: Assemble archive
-        if: runner.os == 'Linux'
         run: |
           set -euo pipefail
           version=$(grep -m1 '^version' Cargo.toml | cut -d '"' -f2)
@@ -90,10 +89,12 @@ jobs:
           rm -rf "$name"
           mkdir "$name"
           cp "$BIN" LICENSE THIRD-PARTY-NOTICES.md chiki8.toml "$name/"
+          if [ "$RUNNER_OS" = "Windows" ]; then
+            cp "${CHIKI8_SDL2_DLL_DIR}/SDL2.dll" "$name/"
+          fi
           tar czf "${name}.tar.gz" "$name"
           echo "ARCHIVE_NAME=${name}" >> "$GITHUB_ENV"
       - name: Extract and re-smoke the archive
-        if: runner.os == 'Linux'
         run: |
           set -euo pipefail
           BIN_NAME=chiki8
@@ -105,3 +106,46 @@ jobs:
           tar xzf "${ARCHIVE_NAME}.tar.gz" -C extracted
           SDL_VIDEODRIVER=dummy SDL_AUDIODRIVER=dummy "extracted/${ARCHIVE_NAME}/${BIN_NAME}" --file smoke.ch8 --frames 5 --capture-frame extracted-smoke.bmp
           test -s extracted-smoke.bmp
+      - name: Upload archive artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.ARCHIVE_NAME }}
+          path: ${{ env.ARCHIVE_NAME }}.tar.gz
+          if-no-files-found: error
+
+  manifest:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download all archives
+        uses: actions/download-artifact@v4
+        with:
+          pattern: chiki8-*
+          path: archives
+          merge-multiple: true
+      - name: Generate SHA256SUMS.txt
+        working-directory: archives
+        run: sha256sum chiki8-*.tar.gz > SHA256SUMS.txt
+      - name: Upload manifest artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: SHA256SUMS
+          path: archives/SHA256SUMS.txt
+      - name: Publish GitHub Release
+        if: github.event_name == 'push'
+        run: |
+          set -euo pipefail
+          version=$(grep -m1 '^version' Cargo.toml | cut -d '"' -f2)
+          tag="v${version}"
+          if gh release view "$tag" >/dev/null 2>&1; then
+            gh release upload "$tag" archives/chiki8-*.tar.gz archives/SHA256SUMS.txt --clobber
+          else
+            gh release create "$tag" archives/chiki8-*.tar.gz archives/SHA256SUMS.txt \
+              --title "chiki8 ${version}" \
+              --notes "Automated build from commit ${{ github.sha }}."
+          fi
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

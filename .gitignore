@@ -12,6 +12,8 @@ target/
 roms/
 roms/*
 
+.gsd/
+.claude/
 
 # Local isolated worktrees
 .worktrees/

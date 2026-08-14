@@ -1,4 +1,3 @@
-<!-- generated-by: gsd-doc-writer -->
 # Getting Started
 
 ## Prerequisites
@@ -40,6 +39,8 @@ cargo build --release
 cargo run --release -- -f path/to/game.ch8
 ```
 
+Add `--profile classic` or `--profile superchip-1.1` to select a profile explicitly instead of relying on automatic detection.
+
 Press `Esc` or close the window to stop the emulator.
 
 ## Create a configuration
@@ -60,5 +61,4 @@ This writes `chiki8.toml` in the current directory. Edit it, then either keep it
 ## Next steps
 
 - [Configuration](CONFIGURATION.md) — settings, defaults, and CLI precedence
-- [Development](DEVELOPMENT.md) — local quality commands and change workflow
-- [Testing](TESTING.md) — test organization and CI checks
+- [Architecture](ARCHITECTURE.md) — machine model, components, and data flow

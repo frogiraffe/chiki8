@@ -1,34 +1,24 @@
-<!-- generated-by: gsd-doc-writer -->
 # chiki8
 
 [![CI](https://github.com/frogiraffe/chiki8/actions/workflows/ci.yml/badge.svg)](https://github.com/frogiraffe/chiki8/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Rust](https://img.shields.io/badge/Rust-2021-orange.svg)](https://www.rust-lang.org/)
 
-A configurable desktop CHIP-8 emulator built with Rust and SDL2.
-
-chiki8 keeps the emulator core deliberately small: a 4 KiB virtual machine, 34 instruction handlers, a 64×32 display, 60 Hz timers, and deterministic unit tests around the machine state. SDL2 handles the native window, keyboard, rendering, and square-wave audio.
+A configurable desktop CHIP-8 and SUPER-CHIP emulator built with Rust and SDL2.
 
 ## Highlights
 
-- Classic CHIP-8 CPU, memory, stack, timers, keypad, font sprites, and XOR drawing
-- Configurable scale, colors, emulation speed, volume, and key mapping
-- Safe ROM-size validation against the 3,584-byte program region
+- Classic CHIP-8 and SUPER-CHIP 1.1 support
+- Configurable pixel scale, colors, speed, volume, and key mapping
 - TOML configuration with CLI overrides
-- Unit tests plus rustfmt and strict Clippy checks in CI
+- Comprehensive unit and integration test suite
 
 ## Prerequisites
 
 - A stable Rust toolchain
 - SDL2 development libraries
 
-On Ubuntu/Debian:
-
-```bash
-sudo apt-get install libsdl2-dev
-```
-
-See [Getting Started](docs/GETTING-STARTED.md) for other platforms and troubleshooting.
+See [Getting Started](docs/GETTING-STARTED.md) for platform-specific setup instructions.
 
 ## Quick start
 
@@ -38,29 +28,34 @@ See [Getting Started](docs/GETTING-STARTED.md) for other platforms and troublesh
    cargo build --release
    ```
 
-2. Run a legally obtained CHIP-8 ROM:
+2. Run a CHIP-8 ROM:
 
    ```bash
    cargo run --release -- -f path/to/game.ch8
    ```
 
-ROM files are intentionally not included in this repository.
+## Gameplay
+
+![chiki8 running demo ROM](docs/assets/chiki8-demo.gif)
 
 ## Usage
 
 ```text
 cargo run --release -- -f <rom_file> [options]
 
--f, --file FILE        ROM file (required)
--s, --scale SCALE      Pixel scale (default: 15)
--p, --speed SPEED      CPU cycles per frame (default: 10)
--v, --volume VOLUME    Volume from 0 to 100 (default: 25)
--b, --background COLOR Background color as R,G,B
--c, --color COLOR      Foreground color as R,G,B
-    --profile PROFILE   Emulation profile (default: classic)
-    --config PATH       TOML configuration path
-    --create-config     Write an example chiki8.toml
-    --help              Show help
+-f, --file FILE          ROM file (required)
+-s, --scale SCALE        Pixel scale (default: 15)
+-p, --speed SPEED        CPU cycles per frame (default: 10)
+-v, --volume VOLUME      Volume from 0 to 100 (default: 25)
+-b, --background COLOR   Background color as R,G,B (default: 0,0,0)
+-c, --color COLOR        Foreground color as R,G,B (default: 255,255,255)
+    --profile PROFILE    Emulation profile: classic or superchip-1.1 (default: classic)
+    --refresh HZ         Display refresh rate: 30, 60, or 120 (default: 60)
+    --filter FILTER      Texture filter: nearest or linear (default: nearest)
+    --integer-scaling    Use native SDL integer scaling (off by default)
+    --config PATH        TOML configuration path
+    --create-config      Write an example chiki8.toml
+    --help               Show help
 ```
 
 Examples:
@@ -69,13 +64,13 @@ Examples:
 # Green pixels at 20× scale
 cargo run --release -- -f path/to/game.ch8 -s 20 -c 0,255,0
 
+# Run in SUPER-CHIP mode
+cargo run --release -- -f path/to/game.ch8 --profile superchip-1.1
+
 # Use a custom configuration file
 cargo run --release -- -f path/to/game.ch8 --config configs/fast.toml
 
-# Select the Classic profile explicitly
-cargo run --release -- -f path/to/game.ch8 --profile classic
-
-# Generate a documented starter configuration
+# Generate a starter configuration file
 cargo run -- --create-config
 ```
 
@@ -91,31 +86,12 @@ A 0 B F          Z X C V
 
 Press `Esc` or close the window to exit. Key assignments can be changed in TOML; see [Configuration](docs/CONFIGURATION.md).
 
-## Architecture
+## Profiles
 
-```text
-ROM + TOML + CLI
-       │
-       ▼
-  CHIP-8 core ──► 64×32 framebuffer ──► SDL2 renderer
-       │
-       ├───────► keypad events ◄────── SDL2 input
-       └───────► sound timer ─────────► SDL2 audio
-```
+- **`classic`** (default): Standard modern CHIP-8 implementation (64×32 display, standard font, edge wrapping).
+- **`superchip-1.1`**: SUPER-CHIP 1.1 legacy profile (supports 64×32 low-res and 128×64 high-res modes, 16×16 sprites, high-res font glyphs, scrolling, and RPL flags).
 
-The CPU core is independent of SDL and directly unit-tested. The runtime loop composes configuration, input, CPU cycles, rendering, timers, and audio. See [Architecture](docs/ARCHITECTURE.md) for the complete flow.
-
-## Compatibility scope
-
-The `classic` profile names chiki8's established modern Classic contract; it is not a claim of original COSMAC VIP behavior. Its five deterministically unit-tested choices are:
-
-- Shift instructions use `VX` and ignore `Y`.
-- `FX55` and `FX65` preserve `I`.
-- `BNNN` uses `V0`.
-- OR, AND, and XOR preserve `VF`.
-- `DXYN` wraps at both display edges.
-
-The project does not yet publish external compatibility ROM evidence. SUPER-CHIP remains unsupported and is not implemented; its profile and behavior are outside the current compatibility scope.
+Profile selection precedence: `--profile` CLI flag > `chiki8.toml` setting > default (`classic`).
 
 ## Development
 
@@ -124,14 +100,6 @@ cargo fmt --check
 cargo test
 cargo clippy --all-targets --all-features -- -D warnings
 ```
-
-More detail is available in [Development](docs/DEVELOPMENT.md) and [Testing](docs/TESTING.md).
-
-## References
-
-- [CHIP-8 Technical Reference](http://devernay.free.fr/hacks/chip8/C8TECH10.HTM)
-- [Write a CHIP-8 Emulator](https://tobiasvl.github.io/blog/write-a-chip-8-emulator/)
-- [CHIP-8 Book](https://github.com/aquova/chip8-book)
 
 ## License
 

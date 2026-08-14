@@ -1,17 +1,16 @@
-<!-- generated-by: gsd-doc-writer -->
 # Configuration
 
-## Sources and precedence
+chiki8 reads `chiki8.toml` from the current directory by default. You can pass a custom config path using `--config PATH`.
 
-chiki8 reads `chiki8.toml` from the current directory by default. Pass `--config PATH` to use another file. CLI values for scale, speed, volume, background, and foreground override the loaded TOML values.
+CLI arguments take precedence over values defined in `chiki8.toml`.
 
-If the file does not exist, built-in defaults are used. If an existing file cannot be read or parsed, the error is printed and the emulator continues with built-in defaults.
-
-## Minimal configuration
+## Example Configuration
 
 ```toml
 [display]
 scale = 15
+filter = "nearest"
+integer_scaling = false
 background = [0, 0, 0]
 foreground = [255, 255, 255]
 
@@ -20,22 +19,26 @@ volume = 25
 
 [emulation]
 speed = 10
+refresh = 60
+profile = "classic"
 ```
 
-All sections are optional. Missing sections and values use the defaults below.
+## Settings Reference
 
-## Settings
+| Setting | Type | Default | CLI Flag | Description |
+|---|---|---|---|---|
+| `display.scale` | integer | `15` | `-s`, `--scale` | Pixel scaling factor |
+| `display.filter` | string | `"nearest"` | `--filter` | Texture filter: `"nearest"` or `"linear"` |
+| `display.integer_scaling` | boolean | `false` | `--integer-scaling` | Enable integer scaling |
+| `display.background` | RGB array | `[0, 0, 0]` | `-b`, `--background` | Background color (R,G,B) |
+| `display.foreground` | RGB array | `[255, 255, 255]` | `-c`, `--color` | Foreground color (R,G,B) |
+| `audio.volume` | integer | `25` | `-v`, `--volume` | Volume from `0` to `100` |
+| `emulation.speed` | integer | `10` | `-p`, `--speed` | CPU cycles executed per frame |
+| `emulation.refresh` | integer | `60` | `--refresh` | Display refresh rate: `30`, `60`, or `120` |
+| `emulation.profile` | string | `"classic"` | `--profile` | Emulation profile: `"classic"` or `"superchip-1.1"` |
+| `keymap.keys` | table | standard layout | — | Key mappings from keyboard keys to CHIP-8 keys |
 
-| Setting | Type | Default | Description |
-|---------|------|---------|-------------|
-| `display.scale` | integer | `15` | Window pixel scale |
-| `display.background` | three bytes | `[0, 0, 0]` | Off-pixel RGB color |
-| `display.foreground` | three bytes | `[255, 255, 255]` | On-pixel RGB color |
-| `audio.volume` | integer | `25` | Percentage used by the square-wave callback; runtime audio is capped at 100 |
-| `emulation.speed` | integer | `10` | CPU cycles executed per 60 Hz frame |
-| `keymap.keys` | key/value table | classic layout | SDL keyboard name mapped to a CHIP-8 key value |
-
-## Key mapping
+## Key Mapping
 
 ```toml
 [keymap.keys]
@@ -57,16 +60,10 @@ All sections are optional. Missing sections and values use the defaults below.
 "V" = 0xF
 ```
 
-Recognized names are digits and uppercase Latin letters supported by `keycode_to_string` in `src/main.rs`. CHIP-8 values outside `0x0`–`0xF` are ignored safely.
+## Generating a Default Configuration
 
-## Generate the example
+To generate a starter `chiki8.toml` file in the current directory:
 
 ```bash
 cargo run -- --create-config
 ```
-
-This writes `chiki8.toml` in the current directory, replacing an existing file at that path.
-
-## Environment variables
-
-No environment variables are required or read by chiki8.

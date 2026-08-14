@@ -71,3 +71,37 @@ jobs:
           printf '\x12\x00' > smoke.ch8
           SDL_VIDEODRIVER=dummy SDL_AUDIODRIVER=dummy "$BIN" --file smoke.ch8 --frames 5 --capture-frame smoke.bmp
           test -s smoke.bmp
+      - name: Assemble archive
+        if: runner.os == 'Linux'
+        run: |
+          set -euo pipefail
+          version=$(grep -m1 '^version' Cargo.toml | cut -d '"' -f2)
+          arch=$(rustc -vV | sed -n 's/host: \([a-zA-Z0-9_]*\)-.*/\1/p')
+          case "$RUNNER_OS" in
+            Linux) os_name=linux ;;
+            Windows) os_name=windows ;;
+            macOS) os_name=macos ;;
+          esac
+          name="chiki8-${version}-${os_name}-${arch}"
+          BIN=target/release/chiki8
+          if [ "$RUNNER_OS" = "Windows" ]; then
+            BIN="${BIN}.exe"
+          fi
+          rm -rf "$name"
+          mkdir "$name"
+          cp "$BIN" LICENSE THIRD-PARTY-NOTICES.md chiki8.toml "$name/"
+          tar czf "${name}.tar.gz" "$name"
+          echo "ARCHIVE_NAME=${name}" >> "$GITHUB_ENV"
+      - name: Extract and re-smoke the archive
+        if: runner.os == 'Linux'
+        run: |
+          set -euo pipefail
+          BIN_NAME=chiki8
+          if [ "$RUNNER_OS" = "Windows" ]; then
+            BIN_NAME="chiki8.exe"
+          fi
+          rm -rf extracted
+          mkdir extracted
+          tar xzf "${ARCHIVE_NAME}.tar.gz" -C extracted
+          SDL_VIDEODRIVER=dummy SDL_AUDIODRIVER=dummy "extracted/${ARCHIVE_NAME}/${BIN_NAME}" --file smoke.ch8 --frames 5 --capture-frame extracted-smoke.bmp
+          test -s extracted-smoke.bmp

@@ -12,7 +12,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest]
+        os: [ubuntu-latest, windows-latest, macos-latest]
     runs-on: ${{ matrix.os }}
     defaults:
       run:
@@ -21,8 +21,38 @@ jobs:
       - uses: actions/checkout@v4
       - name: Show pinned toolchain
         run: rustup show
-      - name: Install SDL2
+      - name: Install SDL2 (Linux)
+        if: runner.os == 'Linux'
         run: sudo apt-get update && sudo apt-get install --yes libsdl2-dev
+      - name: Install SDL2 (Windows)
+        if: runner.os == 'Windows'
+        run: |
+          set -euo pipefail
+          curl -fsSL -o sdl2-devel.zip "https://github.com/libsdl-org/SDL/releases/download/release-2.32.10/SDL2-devel-2.32.10-VC.zip"
+          echo "af347939395a58b365846aaea27391e69f9ec9d4dd650d6ac40802159b418a6e  sdl2-devel.zip" | sha256sum -c - || {
+            echo "::error::SDL2 devel zip checksum mismatch — refusing to use a tampered or unexpected download"
+            exit 1
+          }
+          unzip -q sdl2-devel.zip -d "$RUNNER_TEMP/sdl2-devel"
+          SDL2_LIB_DIR="$RUNNER_TEMP/sdl2-devel/SDL2-2.32.10/lib/x64"
+          if [ -n "${LIB:-}" ]; then
+            echo "LIB=${LIB};${SDL2_LIB_DIR}" >> "$GITHUB_ENV"
+          else
+            echo "LIB=${SDL2_LIB_DIR}" >> "$GITHUB_ENV"
+          fi
+          echo "${SDL2_LIB_DIR}" >> "$GITHUB_PATH"
+          echo "CHIKI8_SDL2_DLL_DIR=${SDL2_LIB_DIR}" >> "$GITHUB_ENV"
+      - name: Install SDL2 (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          set -euo pipefail
+          brew install sdl2
+          SDL2_LIB_DIR="$(brew --prefix)/lib"
+          if [ -n "${LIBRARY_PATH:-}" ]; then
+            echo "LIBRARY_PATH=${LIBRARY_PATH}:${SDL2_LIB_DIR}" >> "$GITHUB_ENV"
+          else
+            echo "LIBRARY_PATH=${SDL2_LIB_DIR}" >> "$GITHUB_ENV"
+          fi
       - name: Build (locked, release)
         run: cargo build --locked --release
       - name: Run tests
@@ -34,6 +64,10 @@ jobs:
       - name: Native SDL smoke check
         run: |
           set -euo pipefail
+          BIN=target/release/chiki8
+          if [ "$RUNNER_OS" = "Windows" ]; then
+            BIN="${BIN}.exe"
+          fi
           printf '\x12\x00' > smoke.ch8
-          SDL_VIDEODRIVER=dummy SDL_AUDIODRIVER=dummy target/release/chiki8 --file smoke.ch8 --frames 5 --capture-frame smoke.bmp
+          SDL_VIDEODRIVER=dummy SDL_AUDIODRIVER=dummy "$BIN" --file smoke.ch8 --frames 5 --capture-frame smoke.bmp
           test -s smoke.bmp

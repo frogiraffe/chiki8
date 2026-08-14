@@ -69,10 +69,18 @@ fn invalid_audio_driver_returns_an_sdl_audio_error() {
 
 #[test]
 fn bounded_run_preserves_cpu_stop_outcomes() {
-    for rom in [[0x00, 0xfd], [0x50, 0x01]] {
-        let output = run_rom(&rom, &["--profile", "superchip-1.1", "--frames", "20"]);
-        assert!(output.status.success(), "{:?}", output.status);
-    }
+    let halted = run_rom(
+        &[0x00, 0xfd],
+        &["--profile", "superchip-1.1", "--frames", "20"],
+    );
+    assert!(halted.status.success(), "{:?}", halted.status);
+
+    let unsupported = run_rom(
+        &[0x50, 0x01],
+        &["--profile", "superchip-1.1", "--frames", "20"],
+    );
+    assert_eq!(unsupported.status.code(), Some(1));
+    assert!(String::from_utf8_lossy(&unsupported.stderr).contains("Unsupported opcode"));
 }
 
 #[test]
@@ -87,7 +95,11 @@ fn cycle_budget_terminates_and_captures_after_exact_ticks() {
             capture.to_str().unwrap(),
         ],
     );
-    assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
     assert_eq!(&fs::read(&capture).expect("read cycle capture")[..2], b"BM");
     fs::remove_file(capture).unwrap();
 }
@@ -147,7 +159,10 @@ fn cycle_budget_captures_a_halted_final_canvas() {
         ],
     );
     assert!(output.status.success());
-    assert_eq!(&fs::read(&capture).expect("read halted capture")[..2], b"BM");
+    assert_eq!(
+        &fs::read(&capture).expect("read halted capture")[..2],
+        b"BM"
+    );
     fs::remove_file(capture).unwrap();
 }
 
@@ -160,9 +175,8 @@ fn suite_selector_rejects_values_outside_the_documented_range_before_sdl() {
             .output()
             .expect("run chiki8");
         assert_eq!(output.status.code(), Some(2));
-        assert!(
-            String::from_utf8_lossy(&output.stderr).contains("expected an integer from 1 through 5")
-        );
+        assert!(String::from_utf8_lossy(&output.stderr)
+            .contains("expected an integer from 1 through 5"));
     }
 }
 

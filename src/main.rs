@@ -797,7 +797,6 @@ mod tests {
         assert!(parse_frames("nope").unwrap_err().contains("CLI frames"));
     }
 
-
     #[test]
     fn cycles_require_a_positive_integer() {
         assert_eq!(parse_cycles("1"), Ok(1));

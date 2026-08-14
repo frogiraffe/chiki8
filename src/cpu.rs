@@ -212,7 +212,9 @@ impl Cpu {
     pub fn tick(&mut self) -> StepOutcome {
         let low_resolution_superchip_draw = self.profile == Profile::SuperChip11
             && self.display_mode == DisplayMode::Low
-            && self.peek_opcode().is_some_and(|opcode| opcode & 0xF000 == 0xD000);
+            && self
+                .peek_opcode()
+                .is_some_and(|opcode| opcode & 0xF000 == 0xD000);
         if low_resolution_superchip_draw && !self.draw_ready {
             return StepOutcome::Executed;
         }

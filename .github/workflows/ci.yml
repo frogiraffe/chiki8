@@ -8,17 +8,32 @@ permissions:
   contents: read
 
 jobs:
-  quality:
-    runs-on: ubuntu-latest
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest]
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        shell: bash
     steps:
       - uses: actions/checkout@v4
+      - name: Show pinned toolchain
+        run: rustup show
       - name: Install SDL2
         run: sudo apt-get update && sudo apt-get install --yes libsdl2-dev
-      - name: Use stable Rust
-        run: rustup update stable && rustup default stable
-      - name: Check formatting
-        run: cargo fmt --check
+      - name: Build (locked, release)
+        run: cargo build --locked --release
       - name: Run tests
         run: cargo test --locked
+      - name: Check formatting
+        run: cargo fmt --check
       - name: Run Clippy
         run: cargo clippy --locked --all-targets --all-features -- -D warnings
+      - name: Native SDL smoke check
+        run: |
+          set -euo pipefail
+          printf '\x12\x00' > smoke.ch8
+          SDL_VIDEODRIVER=dummy SDL_AUDIODRIVER=dummy target/release/chiki8 --file smoke.ch8 --frames 5 --capture-frame smoke.bmp
+          test -s smoke.bmp

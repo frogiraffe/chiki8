@@ -1,16 +1,15 @@
 use std::fs;
 use std::path::PathBuf;
 use std::process::{Command, Output};
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::sync::atomic::{AtomicU64, Ordering};
+
+static NEXT_TEMP_ID: AtomicU64 = AtomicU64::new(0);
 
 fn temp_path(name: &str) -> PathBuf {
+    let id = NEXT_TEMP_ID.fetch_add(1, Ordering::Relaxed);
     std::env::temp_dir().join(format!(
-        "chiki8-runtime-{}-{}-{name}",
-        std::process::id(),
-        SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .expect("system clock")
-            .as_nanos()
+        "chiki8-runtime-{}-{id}-{name}",
+        std::process::id()
     ))
 }
 

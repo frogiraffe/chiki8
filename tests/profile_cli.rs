@@ -1,15 +1,18 @@
 use std::fs;
 use std::process::Command;
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::sync::atomic::{AtomicU64, Ordering};
+
+static NEXT_TEMP_ID: AtomicU64 = AtomicU64::new(0);
+
+fn next_temp_id() -> u64 {
+    NEXT_TEMP_ID.fetch_add(1, Ordering::Relaxed)
+}
 
 fn rom(bytes: &[u8]) -> std::path::PathBuf {
     let path = std::env::temp_dir().join(format!(
         "chiki8-profile-{}-{}.ch8",
         std::process::id(),
-        SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .expect("system clock")
-            .as_nanos()
+        next_temp_id()
     ));
     fs::write(&path, bytes).expect("write ROM fixture");
     path
@@ -27,10 +30,7 @@ fn temp_dir() -> std::path::PathBuf {
     let path = std::env::temp_dir().join(format!(
         "chiki8-config-{}-{}",
         std::process::id(),
-        SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .expect("system clock")
-            .as_nanos()
+        next_temp_id()
     ));
     fs::create_dir(&path).unwrap();
     path

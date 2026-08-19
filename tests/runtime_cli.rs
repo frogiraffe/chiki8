@@ -7,10 +7,7 @@ static NEXT_TEMP_ID: AtomicU64 = AtomicU64::new(0);
 
 fn temp_path(name: &str) -> PathBuf {
     let id = NEXT_TEMP_ID.fetch_add(1, Ordering::Relaxed);
-    std::env::temp_dir().join(format!(
-        "chiki8-runtime-{}-{id}-{name}",
-        std::process::id()
-    ))
+    std::env::temp_dir().join(format!("chiki8-runtime-{}-{id}-{name}", std::process::id()))
 }
 
 fn run_rom(bytes: &[u8], extra: &[&str]) -> Output {
